@@ -1,0 +1,2 @@
+1. Consumption lower bound. If assets are zero, I get neative consumption because of medical expenses.
+2. Update labor choice subroutine correspondingly. This is important, cause it might break the results.
