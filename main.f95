@@ -353,7 +353,7 @@ subroutine valfun(wage,medexp,transmat,surv,ms,vf,pf,lchoice)
         vf(:,lifespan+1,s) = beq !at age 91, when dead
     enddo
     !MAIN ITERATION CYCLE
-    do t = lifespan,1,-1 !for each age 90 to 50
+    do t = lifespan-16,1,-1 !for each age 90 to 50
 		age = t+49
         do s = 1,statesize !for every possible state
             !here, determine wage, med and health shock corresponding to the current state
@@ -362,31 +362,29 @@ subroutine valfun(wage,medexp,transmat,surv,ms,vf,pf,lchoice)
             h = int(ms(s,3)) !h is either 1 or 2
             !over all possible combinations of assets:
             do j = 1,grid_asset     !next-period assets
-                do i = 1,grid_asset !current assets
+                do i = 1,grid_asset !current assets 
                     !First, calculate optimal labor choice
-                    call labchoice(opt_labor, assets(i),assets(j),h,wage(t,w),medexp(t,h,m))
+					call labchoice(opt_labor, assets(i),assets(j),h,wage(t,w),medexp(t,h,m))
                     !print out if optimal labor <0
                     if (opt_labor<0) then
                         print *, opt_labor
+                        print *, 'Labor choice is out of bounds:', opt_labor
+                        call sleep(60)
+                    elseif (opt_labor>ltot-kappa) then
+						print *, opt_labot
+						print *, 'Labor choice is out of bounds:', opt_labor
+                        call sleep(60)
                     endif
                     lab_cur_next(i,j) = opt_labor
-                    !give optimal choice of labor: calculate consumption
-                    cons = (1+r)*assets(i) + wage(t,w)*opt_labor-assets(j)-medexp(t,h,m)
-                    !utility
-                    if (opt_labor >0) then !labor choice > 0
-                        util  = ((1+delta*(h-1))*(cons**ugamma &
-                                *(ltot-opt_labor-kappa)**(1-ugamma))**(1-sigma))/(1-sigma)
-                    else
-                        if (cons <= 0.0d0) then
-                            !individuals have to eat, so they never choose negative or zero consumption;
-                            !so, we set utility for this case as the large negative number
-                            util  = -1e6
-                        else
-                            !agent optimally chooses not to work and get utility
-                            util  = ((1+delta*(h-1))*(cons**ugamma*ltot**(1-ugamma))**(1-sigma))/(1-sigma)
-                        endif
-                        print *, util
+                    !given optimal choice of labor: calculate consumption and utility, different cases
+                    if (assets(j) == 0) then !if next-period asset is zero, then govt transfer to cover minimal consumption is possible
+                    cons = (1+r)*assets(i) + wage(t,w)*opt_labor-assets(j)-medexp(t,h,m) !uncompensated consumption
+						if (cons < cmin) then
+							util = ((1+delta*(h-1))*(cons**ugamma*ltot**(1-ugamma))**(1-sigma))/(1-sigma)
+						endif
                     endif
+                    !unmaxed "value function"
+                    
                     val_nomax(i,j) = util + beta*(surv(t,h)*dot_product(vf(j,t+1,:),transmat(s,:,t)) &
                                 + (1-surv(t,h))*beq(j))
                 enddo

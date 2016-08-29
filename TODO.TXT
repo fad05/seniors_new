@@ -1,2 +1,3 @@
 1. Consumption lower bound. If assets are zero, I get neative consumption because of medical expenses.
 2. Update labor choice subroutine correspondingly. This is important, cause it might break the results.
+3. In labchoice subroutine: what do I do with utility if optimal labor choice is larger than feasible (lmax)? For now, I do a utility penalty.
