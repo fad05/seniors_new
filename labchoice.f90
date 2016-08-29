@@ -1,9 +1,11 @@
-subroutine labchoice (lchoice, acur,anext, h, wage, mexp)
+subroutine labchoice (lchoice, cons, util, acur,anext, h, wage, mexp)
     use parameters
     implicit none
     real (kind = 8), intent(in) :: acur, anext, wage,mexp !current assets, next period assets, current wage, mexp
     integer, intent(in) :: h !health status, 1 or 2
     real (kind = 8), intent(out) :: lchoice !optimal labor choice
+    real (kind = 8), intent(out) :: cons !consumption under optimal choice
+    real (kind = 8), intent(out) :: util !value of utility under optimal choice
 
     !variables necessary to use minpack and local variables
     integer ( kind = 4 ) info, i, u_max_index
@@ -44,15 +46,15 @@ subroutine labchoice (lchoice, acur,anext, h, wage, mexp)
     !if consumption is negative, the utility is set to large negative number, in order never to be optimal.
     
     if (anext == 0) then !next-period savings are 0; check consumption floor!
-		cgrid(1) = (1+r)*acur-mexp-anext !uncompensated consumption on a first gridpoint 
+		cgrid(1) = (1+r)*acur-mexp-anext !uncompensated consumption on a first gridpoint, ZERO labor
 		if (cgrid(1) > cmin) then !consumption is larger than floor value
-			ugrid(1) = ((1+delta*(h-1))*(cgrid(1)**ugamma*ltot**(1-ugamma))**(1-sigma))/(1-sigma)
-		else !consumption value is too low, and no savings for next period
+			ugrid(1) = ((1+delta*(h-1))*(cgrid(1)**ugamma*ltot**(1-ugamma))**(1-sigma))/(1-sigma) !no KAPPA in utility
+		else !consumption value is too low, and no savings for next period: in this case, minimal cnsumption plays
 			cgrid(1) = cmin
-			ugrid(1) = ((1+delta*(h-1))*(cgrid(1)**ugamma*ltot**(1-ugamma))**(1-sigma))/(1-sigma)
+			ugrid(1) = ((1+delta*(h-1))*(cgrid(1)**ugamma*ltot**(1-ugamma))**(1-sigma))/(1-sigma) !no KAPPA in utility
 		endif
 		do i = 2,100
-			cgrid(i) = (1+r)*acur+wage*labgrid(i)-mexp-anext !uncompensated consumption on a ith gridpoint 
+			cgrid(i) = (1+r)*acur+wage*labgrid(i)-mexp-anext !uncompensated consumption on a ith gridpoint, NONZERO labor
 			if (cgrid(i) > cmin) then
 				ugrid(i) = ((1+delta*(h-1))*(cgrid(i)**ugamma*(ltot-labgrid(i)-kappa)**(1-ugamma))**(1-sigma))/(1-sigma)
 			else
@@ -61,15 +63,15 @@ subroutine labchoice (lchoice, acur,anext, h, wage, mexp)
 			endif
 		enddo
     else !anext >0; agent is not entitled to compensation
-		cgrid(1) = (1+r)*acur-mexp-anext
+		cgrid(1) = (1+r)*acur-mexp-anext !ZERO labor income
 		if (cgrid(1) > 0) then
-			ugrid(1) = ((1+delta*(h-1))*(cgrid(1)**ugamma*ltot**(1-ugamma))**(1-sigma))/(1-sigma)
+			ugrid(1) = ((1+delta*(h-1))*(cgrid(1)**ugamma*ltot**(1-ugamma))**(1-sigma))/(1-sigma) !no KAPPA in utility
 		else
 			ugrid(1) = -1.0d5 !if cons is zero or negative, utility is highly negative
 		endif
 		
 		do i = 2,100
-			cgrid(i) = (1+r)*acur+wage*labgrid(i)-mexp-anext
+			cgrid(i) = (1+r)*acur+wage*labgrid(i)-mexp-anext !NONZERO labor income
 			if (cgrid(i)>0) then
 				ugrid(i) = ((1+delta*(h-1))*(cgrid(i)**ugamma*(ltot-labgrid(i)-kappa)**(1-ugamma))**(1-sigma))/(1-sigma)				
 			else
@@ -87,7 +89,44 @@ subroutine labchoice (lchoice, acur,anext, h, wage, mexp)
     if (info>=1 .AND. info<=3 .AND. lc(1)>=0.0d0 .AND. lc(1) <= lmax) then !optimal solution is found and it is within feasible range
 		print *, info
         lchoice = lc(1)
-        counter = 0
+        util = uchoice
+        if (lchoice > 0) then !POSITIVE labor
+			cons = (1+r)*acur+wage*lchoice-mexp-anext !there is labor income
+			!print *, 'Bingo! Internal solution!'
+			if (anext == 0) then
+				if (cons > cmin) then
+					util = ((1+delta*(h-1))*(cons**ugamma*(ltot-lchoice-kappa)**(1-ugamma))**(1-sigma))/(1-sigma)
+				else
+					cons = cmin
+					util = ((1+delta*(h-1))*(cons**ugamma*(ltot-lchoice-kappa)**(1-ugamma))**(1-sigma))/(1-sigma)
+				endif
+			else 
+				if (cons > 0) then
+					util = ((1+delta*(h-1))*(cons**ugamma*(ltot-lchoice-kappa)**(1-ugamma))**(1-sigma))/(1-sigma)
+				else
+					util = -1.0d5
+				endif
+			endif
+        else  !ZERO labor, no KAPPA in utility
+			!print *, 'Zero labor is chosen by algorithm!'
+			!call sleep(3)
+			cons = (1+r)*acur+mexp-anext !ZERO labor income
+			if (anext == 0) then 					
+				if (cons > cmin) then
+					util = ((1+delta*(h-1))*(cons**ugamma*ltot**(1-ugamma))**(1-sigma))/(1-sigma)
+				else
+					cons = cmin
+					util = ((1+delta*(h-1))*(cons**ugamma*ltot**(1-ugamma))**(1-sigma))/(1-sigma)
+				endif
+			else 
+				if (cons > 0) then
+					util = ((1+delta*(h-1))*(cons**ugamma*ltot**(1-ugamma))**(1-sigma))/(1-sigma)
+				else
+					util = -1.0d5
+				endif	
+			endif
+        endif        
+        counter = 0 !Nullify counter
     elseif (info>=1 .AND. info<=3 .AND. lc(1)<0.0d0) then !optimal solution found and it's negative: something's wrong with the code
         print *, info
         print *, 'Negative hours! Check the code!'
@@ -100,11 +139,33 @@ subroutine labchoice (lchoice, acur,anext, h, wage, mexp)
 		call sleep(120)
 	elseif (info >= 4) then
 		counter = counter+1
-		lguess = lguess + max((-1)**counter*counter*100,0) !try another guess
+		lguess = lguess + max((-1)**counter*counter*100,0) !update initial guess
 		print *, info
-		if (counter > 5) then
+		if ((counter > 10 .AND. labgrid_max >0) .OR. (counter > 3 .AND. labgrid_max == 0)) then !if maximum utility is at zero labor, we only repeat search 3 times; if max utility on the grid achieved NOT in zero labor, we search 10 times with different initial guesses 
 			lchoice = labgrid_max !in this case, pick labor that corresponds to a maximum on the grid
-			print *, 'Labor on the grid is chosen:', lchoice
+			if (lchoice /= 0.0d0) then
+				print *,  'Nonzero labor on the grid is chosen, somethings''s wrong:', lchoice
+				call sleep(120)
+			else !ZERO labor, no KAPPA in utility
+				print *, 'Zero labor is chosen from the grid!'
+				!call sleep(3)
+				cons = (1+r)*acur-mexp-anext ! no labor income
+				if (anext == 0) then 					
+					if (cons > cmin) then
+						util = ((1+delta*(h-1))*(cons**ugamma*ltot**(1-ugamma))**(1-sigma))/(1-sigma) !no KAPPA in utility
+					else
+						cons = cmin
+						util = ((1+delta*(h-1))*(cons**ugamma*ltot**(1-ugamma))**(1-sigma))/(1-sigma) !no KAPPA in utility
+					endif
+				else 
+					if (cons > 0) then
+						util = ((1+delta*(h-1))*(cons**ugamma*ltot**(1-ugamma))**(1-sigma))/(1-sigma) !no KAPPA in utility
+					else
+						util = -1.0d5
+					endif	
+				endif
+			endif
+			counter = 0 !Nullify counter
 		else
 			goto 10 !make a new search attempt with different guess
 		endif
@@ -134,7 +195,26 @@ subroutine labchoice (lchoice, acur,anext, h, wage, mexp)
 			
 			if (lab > lmax) then !choice is infeasible
 				fvec(1) = 1.0d5 !large POSITIVE utility, since we're minimizing; we can't afford violation of this constraint; thus it's never optimal to choose this amount of hours
-			else
+			elseif (lab == 0) then !ZERO labor is chosen; no KAPPA in utility
+				cl = (1+r)*acur-mexp-anext !no labor income
+				!Now, calculate consumption depending of anext (whether or not there is a consumption floor satisfied)
+				!Remember, here fvec is NEGATIVE of utility, so to find a minimum!
+				if (anext == 0) then
+					bma = 0
+					if (cl < cmin) then
+						bma = cmin - cl
+						cl = cmin
+					endif
+					fvec1(1) = - ((1+delta*(h-1))*(cl**ugamma*ltot**(1-ugamma))**(1-sigma))/(1-sigma)!no KAPPA in utility
+				else
+					bma = 0
+					if (cl > 0) then 
+						fvec1(1) = - ((1+delta*(h-1))*(cl**ugamma*ltot**(1-ugamma))**(1-sigma))/(1-sigma)!no KAPPA in utility
+					else
+						fvec(1) = 1.0d5 !large POSITIVE utility, since we're minimizing
+					endif
+				endif
+			else !labor is larger than zero and less than lmax; there is KAPPA in utility
 				cl = (1+r)*acur+wage*lab-mexp-anext
 				!Now, calculate consumption depending of anext (whether or not there is a consumption floor satisfied)
 				!Remember, here fvec is NEGATIVE of utility, so to find a minimum!

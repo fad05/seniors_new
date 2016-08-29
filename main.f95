@@ -37,12 +37,14 @@ subroutine valfun(wage,medexp,transmat,surv,ms,vf,pf,lchoice)
     integer, dimension(:,:,:), intent(out) :: pf
     real (kind = 8), dimension(:,:,:), intent(out) :: lchoice
 end subroutine valfun
-subroutine labchoice (lchoice, acur,anext, h, wage, mexp)
+subroutine labchoice (lchoice, cons, util, acur,anext, h, wage, mexp)
     use parameters
     implicit none
-    real (kind = 8), intent(in) :: acur, anext, wage,mexp !current assets, next period assets, current wage, mexp and current wage and mexp shocks
-    integer, intent(in) :: h !health status
+    real (kind = 8), intent(in) :: acur, anext, wage,mexp !current assets, next period assets, current wage, mexp
+    integer, intent(in) :: h !health status, 1 or 2
     real (kind = 8), intent(out) :: lchoice !optimal labor choice
+    real (kind = 8), intent(out) :: cons !consumption under optimal choice
+    real (kind = 8), intent(out) :: util !value of utility under optimal choice
 end subroutine labchoice
 end interface
 
@@ -353,7 +355,7 @@ subroutine valfun(wage,medexp,transmat,surv,ms,vf,pf,lchoice)
         vf(:,lifespan+1,s) = beq !at age 91, when dead
     enddo
     !MAIN ITERATION CYCLE
-    do t = lifespan-16,1,-1 !for each age 90 to 50
+    do t = lifespan,1,-1 !for each age 90 to 50
 		age = t+49
         do s = 1,statesize !for every possible state
             !here, determine wage, med and health shock corresponding to the current state
@@ -364,27 +366,20 @@ subroutine valfun(wage,medexp,transmat,surv,ms,vf,pf,lchoice)
             do j = 1,grid_asset     !next-period assets
                 do i = 1,grid_asset !current assets 
                     !First, calculate optimal labor choice
-					call labchoice(opt_labor, assets(i),assets(j),h,wage(t,w),medexp(t,h,m))
+					call labchoice(opt_labor, cons, util, assets(i),assets(j),h,wage(t,w),medexp(t,h,m))
                     !print out if optimal labor <0
                     if (opt_labor<0) then
                         print *, opt_labor
                         print *, 'Labor choice is out of bounds:', opt_labor
                         call sleep(60)
                     elseif (opt_labor>ltot-kappa) then
-						print *, opt_labot
+						print *, opt_labor
 						print *, 'Labor choice is out of bounds:', opt_labor
                         call sleep(60)
                     endif
                     lab_cur_next(i,j) = opt_labor
-                    !given optimal choice of labor: calculate consumption and utility, different cases
-                    if (assets(j) == 0) then !if next-period asset is zero, then govt transfer to cover minimal consumption is possible
-                    cons = (1+r)*assets(i) + wage(t,w)*opt_labor-assets(j)-medexp(t,h,m) !uncompensated consumption
-						if (cons < cmin) then
-							util = ((1+delta*(h-1))*(cons**ugamma*ltot**(1-ugamma))**(1-sigma))/(1-sigma)
-						endif
-                    endif
-                    !unmaxed "value function"
-                    
+
+                    !unmaxed "value function"                    
                     val_nomax(i,j) = util + beta*(surv(t,h)*dot_product(vf(j,t+1,:),transmat(s,:,t)) &
                                 + (1-surv(t,h))*beq(j))
                 enddo
