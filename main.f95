@@ -159,7 +159,11 @@ do i = 1,ntypes
         !print *, wagecoefs(i,4) + wagecoefs(i,5)*50 + wage_z(k,1)
         !print *, exp(wagecoefs(i,4) + wagecoefs(i,5)*50 + wage_z(k,1))
         wages(:,k,i) = exp(wagecoefs(i,4) + wagecoefs(i,5)*age + wage_z(k,1))
+        
+		!QUESTIONABLE: TRUNCATED WAGES --------------------------------------
         wages(26:lifespan,k,i) = 0 ! once agent reaches 76, no wage available
+		!QUESTIONABLE: TRUNCATED WAGES --------------------------------------
+
         !print *, wages(:,k,i)
     enddo
 
@@ -220,8 +224,9 @@ lchoice = -10
 !value function
 call valfun(wages(:,:,ind_type),medexp(:,:,:,ind_type),transmat(:,:,:,ind_type),surv(:,:,ind_type),ms,vf,pf,lchoice)
 end
-!end main
+!End of main program
 !========================================================================
+!Local subroutines
 subroutine valfun(wage,medexp,transmat,surv,ms,vf,pf,lchoice)
     use parameters
     implicit none
@@ -355,7 +360,7 @@ subroutine valfun(wage,medexp,transmat,surv,ms,vf,pf,lchoice)
         vf(:,lifespan+1,s) = beq !at age 91, when dead
     enddo
     !MAIN ITERATION CYCLE
-    do t = lifespan,1,-1 !for each age 90 to 50
+    do t = lifespan-20,1,-1 !for each age 90 to 50
 		age = t+49
         do s = 1,statesize !for every possible state
             !here, determine wage, med and health shock corresponding to the current state
@@ -367,16 +372,6 @@ subroutine valfun(wage,medexp,transmat,surv,ms,vf,pf,lchoice)
                 do i = 1,grid_asset !current assets 
                     !First, calculate optimal labor choice
 					call labchoice(opt_labor, cons, util, assets(i),assets(j),h,wage(t,w),medexp(t,h,m))
-                    !print out if optimal labor <0
-                    if (opt_labor<0) then
-                        print *, opt_labor
-                        print *, 'Labor choice is out of bounds:', opt_labor
-                        call sleep(60)
-                    elseif (opt_labor>ltot-kappa) then
-						print *, opt_labor
-						print *, 'Labor choice is out of bounds:', opt_labor
-                        call sleep(60)
-                    endif
                     lab_cur_next(i,j) = opt_labor
 
                     !unmaxed "value function"                    
@@ -384,6 +379,9 @@ subroutine valfun(wage,medexp,transmat,surv,ms,vf,pf,lchoice)
                                 + (1-surv(t,h))*beq(j))
                 enddo
             enddo
+            print *, val_nomax(1,:)
+            print *, val_nomax(2,:)
+            print *, val_nomax(10,:)
             vf(:,t,s) = maxval(val_nomax,2)
             pf(:,t,s) = maxloc(val_nomax,2)
             lchoice(:,t,s) = (/(lab_cur_next(k,pf(k,t,s)),k=1,grid_asset)/)

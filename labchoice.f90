@@ -235,5 +235,15 @@ subroutine labchoice (lchoice, cons, util, acur,anext, h, wage, mexp)
 				endif
             endif
         end subroutine lc_minpack
-
+        
+        subroutine cons_util_calc(lbr, wg, acrnt, anxt, mxp, cns, utl)
+			real (kind = 8), intent(in) :: lbr, wg, acrnt, anxt, mxp
+			real (kind = 8), intent(out) :: cns, utl
+			!BODY
+			cns = (1+r)*acrnt + lbr*wg - anxt - mxp !uncompensated consumption
+			if (lbr == 0) then 
+			else
+			endif
+			
+		end subroutine cons_util_calc
 end subroutine labchoice
