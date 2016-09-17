@@ -248,6 +248,7 @@ subroutine valfun(wage,medexp,transmat,surv,ms,vf,pf,lchoice)
     real (kind = 8) assets(grid_asset), beq(grid_asset), cons, util, opt_labor, val_nomax(grid_asset,grid_asset)
     real (kind = 8) lab_cur_next(grid_asset,grid_asset) !labor choice given current and next period asset
     integer i,j,k,t,s,w,m,h, age
+    
 !BODY OF VALFUN
 !1. Check input and output matrices' dimensions
     if (size(wage,1) .NE. lifespan) then
@@ -339,12 +340,16 @@ subroutine valfun(wage,medexp,transmat,surv,ms,vf,pf,lchoice)
         vf = -19
         return
     endif
+    
+!2.    !create assets grid
+    call linspace(asset_min,asset_max,grid_asset,assets)	
+	
 
-!2. IF INPUTS ARE CORRECT, CALCULATE VALUE FUNCTION BY BACKWARDS INDUCTION
-    !create assets grid
-    call linspace(asset_min,asset_max,grid_asset,assets)
-    !bequests depending on assets
-    beq = eta*(assets+d)**(1-sigma)/(1-sigma)
+!4. IF INPUTS ARE CORRECT, CALCULATE VALUE FUNCTION BY BACKWARDS INDUCTION
+
+    !bequests depending on assets, scaled properly
+    !EXPRESS assets and d in 1000's of USD
+    beq = eta*((assets+d)/scale_factor)**(1-sigma)/(1-sigma)
     !Value function next period has two dimensions: possible CURRENT assets and CURRENT state of the world:
     !a combination of wage shock, med expenditure shock and health.
     !Every particular combination of current asset and current shock in equilibrium define an optimal behavior.
@@ -360,7 +365,7 @@ subroutine valfun(wage,medexp,transmat,surv,ms,vf,pf,lchoice)
         vf(:,lifespan+1,s) = beq !at age 91, when dead
     enddo
     !MAIN ITERATION CYCLE
-    do t = lifespan-20,1,-1 !for each age 90 to 50
+    do t = lifespan,1,-1 !for each age 90 to 50
 		age = t+49
         do s = 1,statesize !for every possible state
             !here, determine wage, med and health shock corresponding to the current state
@@ -373,17 +378,27 @@ subroutine valfun(wage,medexp,transmat,surv,ms,vf,pf,lchoice)
                     !First, calculate optimal labor choice
 					call labchoice(opt_labor, cons, util, assets(i),assets(j),h,wage(t,w),medexp(t,h,m))
                     lab_cur_next(i,j) = opt_labor
+                    print *, opt_labor
 
                     !unmaxed "value function"                    
                     val_nomax(i,j) = util + beta*(surv(t,h)*dot_product(vf(j,t+1,:),transmat(s,:,t)) &
                                 + (1-surv(t,h))*beq(j))
                 enddo
             enddo
-            print *, val_nomax(1,:)
-            print *, val_nomax(2,:)
-            print *, val_nomax(10,:)
             vf(:,t,s) = maxval(val_nomax,2)
             pf(:,t,s) = maxloc(val_nomax,2)
+            if (age <= 60) then
+	            do k = 1,grid_asset
+					print *, val_nomax(k,1), val_nomax(k,2), val_nomax(k,3), val_nomax(k,4), val_nomax(k,5), val_nomax(k,6), &
+							val_nomax(k,7), val_nomax(k,8),  val_nomax(k,9),val_nomax(k,10)
+	            enddo            
+	            do k = 1,grid_asset
+					print *, vf(k,t,s)
+				enddo            
+	            do k = 1,grid_asset
+					print *, pf(k,t,s)
+				enddo
+			endif
             lchoice(:,t,s) = (/(lab_cur_next(k,pf(k,t,s)),k=1,grid_asset)/)
         enddo
     enddo
