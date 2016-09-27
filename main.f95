@@ -3,39 +3,20 @@
 program main
 
 use parameters
+use procedures
 implicit none
 
 
 interface
-subroutine import_data(datafile,outdata)
-    implicit none
-    character*200, intent(in) :: datafile ! address of a data file to read
-    real (kind = 8), dimension(:,:), intent(out) :: outdata
-end subroutine
-subroutine import_matrices(datafile,outdata)
-    implicit none
-    character*200, intent(in) :: datafile ! address of a data fie to read
-    real (kind = 8), dimension(:,:,:), intent(out) :: outdata
-end subroutine import_matrices
-subroutine import_vector(datafile,outdata)
-    implicit none
-    character*200, intent(in) :: datafile ! address of a data file to read
-    real (kind = 8), dimension(:), intent(out) :: outdata
-end subroutine import_vector
-subroutine  linspace(a,b,n,outvec)
-    real (kind = 8), intent(in) :: a, b !starting point, endpoint
-    integer, intent(in) :: n !number of points
-    real (kind = 8), dimension(n), intent(out) :: outvec !output vector
-end subroutine linspace
 subroutine valfun(wage,medexp,transmat,surv,ms,vf,pf,lchoice)
     use parameters
     implicit none
-    real (kind = 8), dimension(:,:), intent(in) :: wage,surv
+    real (kind = 8), dimension(:,:), intent(in) :: wage, surv
     real (kind = 8), dimension(:,:,:), intent(in) :: medexp, transmat
     integer, dimension(statesize,3), intent(in) :: ms
-    real (kind = 8), dimension(:,:,:), intent(out) :: vf
-    integer, dimension(:,:,:), intent(out) :: pf
-    real (kind = 8), dimension(:,:,:), intent(out) :: lchoice
+    real (kind = 8), dimension(:,:,:,:), intent(out) :: vf
+    integer, dimension(:,:,:,:), intent(out) :: pf
+    real (kind = 8), dimension(:,:,:,:), intent(out) :: lchoice
 end subroutine valfun
 subroutine labchoice (lchoice, cons, util, acur,anext, h, wage, mexp)
     use parameters
@@ -46,6 +27,14 @@ subroutine labchoice (lchoice, cons, util, acur,anext, h, wage, mexp)
     real (kind = 8), intent(out) :: cons !consumption under optimal choice
     real (kind = 8), intent(out) :: util !value of utility under optimal choice
 end subroutine labchoice
+subroutine lc_simulation(in_asset,in_aime, years_aime,transmat,valfun,policy,labor)
+	use parameters
+	real (kind = 8), intent(in) :: in_asset, in_aime, years_aime
+	real (kind = 8), intent(in), dimension(:,:,:,:) :: valfun
+	integer, intent(in), dimension(:,:,:,:) :: policy
+	real (kind = 8), dimension(:,:,:,:), intent(in) :: labor
+	real (kind = 8), dimension(:,:,:), intent(in) :: transmat
+end subroutine lc_simulation
 end interface
 
 !PROGRAM VARIABLES
@@ -64,10 +53,10 @@ real (kind = 8), dimension(8,3) :: typemat
 real (kind = 8) healthtrans(lifespan-1,2,ntypes), surv(lifespan,2,ntypes)
 real (kind = 8) htrans_full(2,2,lifespan-1,ntypes)
 real (kind = 8) transmat(statesize,statesize,lifespan-1,ntypes)
-real (kind = 8) vf(grid_asset,lifespan+1,statesize) !lifespan + additional period of bequests (leave bequest at age 91)
-integer pf(grid_asset,lifespan,statesize) !lifespan (no policy for age 91)
-real (kind = 8) lchoice(grid_asset,lifespan,statesize) !optimal labor choice given current asset, current state and current age
-integer i,j,k,t,w,wn,m,mn,h,hn,ind_type
+real (kind = 8) vf(grid_asset,statesize,grid_ss,lifespan+1) !lifespan + additional period of bequests (leave bequest at age 91)
+integer pf(grid_asset,statesize,grid_ss,lifespan) !lifespan (no policy for age 91)
+real (kind = 8) lchoice(grid_asset,statesize,grid_ss,lifespan) !optimal labor choice given current asset, current state and current age
+integer i,j,k,l,t,w,wn,m,mn,h,hn,ind_type
 integer :: cohort, sex, college, health, age(lifespan) = (/(i,i=50,90)/)
 integer ms(statesize,3)
 
@@ -159,9 +148,9 @@ do i = 1,ntypes
         !print *, wagecoefs(i,4) + wagecoefs(i,5)*50 + wage_z(k,1)
         !print *, exp(wagecoefs(i,4) + wagecoefs(i,5)*50 + wage_z(k,1))
         wages(:,k,i) = exp(wagecoefs(i,4) + wagecoefs(i,5)*age + wage_z(k,1))
-        
+
 		!QUESTIONABLE: TRUNCATED WAGES --------------------------------------
-        wages(26:lifespan,k,i) = 0 ! once agent reaches 76, no wage available
+        !wages(26:lifespan,k,i) = 0 ! once agent reaches 76, no wage available
 		!QUESTIONABLE: TRUNCATED WAGES --------------------------------------
 
         !print *, wages(:,k,i)
@@ -217,38 +206,46 @@ do k = 1,ntypes
     enddo
 enddo
 !-----------------------------------------------------------------------
+!		TESTING GROUNDS
+
 !5. Pick a type between 1 and 8, and calculate optimal labor choice matrix and value function for a chosen type
 ind_type = 1
 !labor choice
 lchoice = -10
 !value function
 call valfun(wages(:,:,ind_type),medexp(:,:,:,ind_type),transmat(:,:,:,ind_type),surv(:,:,ind_type),ms,vf,pf,lchoice)
+
+call lc_simulation(2.0d5,1.0d3,1.5d1,transmat(:,:,:,ind_type),vf,pf,lchoice)
+!		END TESTING
+!-----------------------------------------------------------------------
 end
 !End of main program
 !========================================================================
 !Local subroutines
 subroutine valfun(wage,medexp,transmat,surv,ms,vf,pf,lchoice)
     use parameters
+    use procedures
     implicit none
 !INPUTS AND OUTPUTS
     !dimensions, wage: lifespan x nwagebins
     !dimensions, surv: lifespan x 2 (health)
     real (kind = 8), dimension(:,:), intent(in) :: wage, surv
-    !dimensions: lifespan x 2 (health) x nmedbins
+    !dimensions: lifespan x 2 (health) x nmedbins: medexp
+    !dimensions: statesize x statesize x lifespan
     real (kind = 8), dimension(:,:,:), intent(in) :: medexp, transmat
     !dimensions: statesize x 3
     integer, dimension(statesize,3), intent(in) :: ms
-    !dimensions: asset x lifespan+1 x state
-    real (kind = 8), dimension(:,:,:), intent(out) :: vf
-    !dimensions: asset x lifespan x state
-    integer, dimension(:,:,:), intent(out) :: pf
-    !dimensions: asset x lifespan x state
-    real (kind = 8), dimension(:,:,:), intent(out) :: lchoice
+    !dimensions: asset x state x ss x lifespan+1
+    real (kind = 8), dimension(:,:,:,:), intent(out) :: vf
+    !dimensions: asset x state x ss x lifespan
+    integer, dimension(:,:,:,:), intent(out) :: pf
+    !dimensions: asset x state x ss x lifespan
+    real (kind = 8), dimension(:,:,:,:), intent(out) :: lchoice
 !INTERNAL VARIABLES
-    real (kind = 8) assets(grid_asset), beq(grid_asset), cons, util, opt_labor, val_nomax(grid_asset,grid_asset)
+    real (kind = 8) assets(grid_asset), beq(grid_asset), ss(grid_ss), cons, util, opt_labor, val_nomax(grid_asset,grid_asset)
     real (kind = 8) lab_cur_next(grid_asset,grid_asset) !labor choice given current and next period asset
-    integer i,j,k,t,s,w,m,h, age
-    
+    integer i,j,k,l,t,s,w,m,h, age
+
 !BODY OF VALFUN
 !1. Check input and output matrices' dimensions
     if (size(wage,1) .NE. lifespan) then
@@ -293,57 +290,69 @@ subroutine valfun(wage,medexp,transmat,surv,ms,vf,pf,lchoice)
         print *, 'Value function "asset" size is incorrect!'
         vf = -9
         return
-    elseif (size(vf,2) .NE. lifespan+1) then
-        print *, 'Value function "period of life" size is incorrect!'
+    elseif (size(vf,2) .NE. statesize) then
+        print *, 'Value function "state" size is incorrect!'
         vf = -10
         return
-    elseif (size(vf,3) .NE. statesize) then
-        print *, 'Value function "state" size is incorrect!'
+    elseif (size(vf,3) .NE. grid_ss) then
+        print *, 'Value function "social security" size is incorrect!'
         vf = -11
+        return
+    elseif (size(vf,4) .NE. lifespan+1) then
+        print *, 'Value function "lifespan+1" size is incorrect!'
+        vf = -12
         return
     endif
 
     if (size(surv,1) .NE. lifespan) then
         print *, 'Survival matrix "lifespan" size is incorrect!'
-        vf = -12
+        vf = -13
         return
     elseif (size(surv,2) .NE. 2) then
         print *, 'Survival matrix "health state" size is incorrect!'
-        vf = -13
+        vf = -14
         return
     endif
 
     if (size(pf,1) .NE. grid_asset) then
         print *, 'Policy function "asset" size is incorrect!'
-        vf = -14
-        return
-    elseif (size(pf,2) .NE. lifespan) then
-        print *, 'Policy function "period of life" size is incorrect!'
         vf = -15
         return
-    elseif (size(pf,3) .NE. statesize) then
+    elseif (size(pf,2) .NE. statesize) then
         print *, 'Policy function "state" size is incorrect!'
         vf = -16
+        return
+    elseif (size(pf,3) .NE. grid_ss) then
+        print *, 'Policy function "social security" size is incorrect!'
+        vf = -17
+    elseif (size(pf,4) .NE. lifespan) then
+        print *, 'Policy function "lifespan" size is incorrect!'
+        vf = -18
         return
     endif
 
     if (size(lchoice,1) .NE. grid_asset) then
         print *, 'Labchoice "asset" size is incorrect!'
-        vf = -17
-        return
-    elseif (size(lchoice,2) .NE. lifespan) then
-        print *, 'Labchoice "period of life" size is incorrect!'
-        vf = -18
-        return
-    elseif (size(lchoice,3) .NE. statesize) then
-        print *, 'Labchoice "state" size is incorrect!'
         vf = -19
         return
+    elseif (size(lchoice,2) .NE. statesize) then
+        print *, 'Labchoice "state" size is incorrect!'
+        vf = -20
+        return
+    elseif (size(lchoice,3) .NE. grid_ss) then
+        print *, 'Labchoice "social security" size is incorrect!'
+        vf = -21
+        return
+    elseif (size(lchoice,4) .NE. lifespan) then
+        print *, 'Labchoice "lifespan" size is incorrect!'
+        vf = -22
+        return
     endif
-    
-!2.    !create assets grid
-    call linspace(asset_min,asset_max,grid_asset,assets)	
-	
+
+!2.    !create assets grid and social security grid
+    call linspace(asset_min,asset_max,grid_asset,assets)
+    call linspace(0.0d0,ss_max,grid_ss,ss)
+
 
 !4. IF INPUTS ARE CORRECT, CALCULATE VALUE FUNCTION BY BACKWARDS INDUCTION
 
@@ -361,47 +370,151 @@ subroutine valfun(wage,medexp,transmat,surv,ms,vf,pf,lchoice)
     !No uncertainty here, since everybody dies with certainty after age of 90.
     !Similarly, value function upon death is the same as expected value function upon death (since no uncertainty).
     !value function upon death
-    do s = 1,statesize
-        vf(:,lifespan+1,s) = beq !at age 91, when dead
+    do k = 1,grid_ss
+		do s = 1,statesize
+			vf(:,s,k,lifespan+1) = beq !at age 91, when dead; for every state and every level of social security is the same
+		enddo
     enddo
+    !initialize vf and pf
+    vf = -101
+    pf = -102
     !MAIN ITERATION CYCLE
     do t = lifespan,1,-1 !for each age 90 to 50
 		age = t+49
-        do s = 1,statesize !for every possible state
-            !here, determine wage, med and health shock corresponding to the current state
-            w = int(ms(s,1))
-            m = int(ms(s,2))
-            h = int(ms(s,3)) !h is either 1 or 2
-            !over all possible combinations of assets:
-            do j = 1,grid_asset     !next-period assets
-                do i = 1,grid_asset !current assets 
-                    !First, calculate optimal labor choice
-					call labchoice(opt_labor, cons, util, assets(i),assets(j),h,wage(t,w),medexp(t,h,m))
-                    lab_cur_next(i,j) = opt_labor
-                    print *, opt_labor
+		do k = 1,grid_ss !for each grid level of social security
+	        do s = 1,statesize !for every possible state
+	            !here, determine wage, med and health shock corresponding to the current state
+	            w = int(ms(s,1))
+	            m = int(ms(s,2))
+	            h = int(ms(s,3)) !h is either 1 or 2
+	            !over all possible combinations of assets:
+	            do j = 1,grid_asset     !next-period assets
+	                do i = 1,grid_asset !current assets
+	                    !First, calculate optimal labor choice
+						call labchoice(opt_labor, cons, util, assets(i),assets(j),h,wage(t,w),medexp(t,h,m),ss(k))
+	                    lab_cur_next(i,j) = opt_labor
+	                    print *, opt_labor
 
-                    !unmaxed "value function"                    
-                    val_nomax(i,j) = util + beta*(surv(t,h)*dot_product(vf(j,t+1,:),transmat(s,:,t)) &
-                                + (1-surv(t,h))*beq(j))
-                enddo
-            enddo
-            vf(:,t,s) = maxval(val_nomax,2)
-            pf(:,t,s) = maxloc(val_nomax,2)
-            if (age <= 60) then
-	            do k = 1,grid_asset
-					print *, val_nomax(k,1), val_nomax(k,2), val_nomax(k,3), val_nomax(k,4), val_nomax(k,5), val_nomax(k,6), &
-							val_nomax(k,7), val_nomax(k,8),  val_nomax(k,9),val_nomax(k,10)
-	            enddo            
-	            do k = 1,grid_asset
-					print *, vf(k,t,s)
-				enddo            
-	            do k = 1,grid_asset
-					print *, pf(k,t,s)
-				enddo
-			endif
-            lchoice(:,t,s) = (/(lab_cur_next(k,pf(k,t,s)),k=1,grid_asset)/)
+	                    !unmaxed "value function"
+	                    val_nomax(i,j) = util + beta*(surv(t,h)*dot_product(vf(j,:,k,t+1),transmat(s,:,t)) &
+	                                + (1-surv(t,h))*beq(j))
+	                enddo
+	            enddo
+	            vf(:,s,k,t) = maxval(val_nomax,2)
+	            pf(:,s,k,t) = maxloc(val_nomax,2)
+	            if (age <= 60) then
+		            do l = 1,grid_asset
+						print *, val_nomax(l,1), val_nomax(l,2), val_nomax(l,3), val_nomax(l,4), val_nomax(l,5), val_nomax(l,6), &
+								val_nomax(l,7), val_nomax(l,8),  val_nomax(l,9),val_nomax(l,10)
+		            enddo
+		            do l = 1,grid_asset
+						print *, vf(l,s,k,t)
+					enddo
+		            do l = 1,grid_asset
+						print *, pf(l,s,k,t)
+					enddo
+				endif
+	            lchoice(:,s,k,t) = (/(lab_cur_next(l,pf(l,s,k,t)),l=1,grid_asset)/)
+	        enddo
         enddo
     enddo
     return
 end subroutine valfun
+
+subroutine lc_simulation(in_asset,in_aime, years_aime,transmat,valfun,policy,labor)
+!this subroutine simulates the life cycle of an individual given:
+!-initial assets
+!-initial AIME
+!-number of working years up to now (used to calculate AIME)
+!-value function
+!-policy function
+use parameters
+use procedures
+real (kind = 8), intent(in) :: in_asset, in_aime, years_aime
+real (kind = 8), intent(in), dimension(:,:,:,:) :: valfun
+integer, intent(in), dimension(:,:,:,:) :: policy
+!dimensions: asset x state x ss x lifespan
+real (kind = 8), dimension(:,:,:,:), intent(in) :: labor
+!dimensions: statesize x statesize x lifespan
+real (kind = 8), dimension(:,:,:), intent(in) :: transmat
+
+!LOCAL VARIABLES
+real (kind = 8) acur, anext, workyears, app, apn, apx, aime, lpp,lpn,lpx
+integer iaprev, ianext
+real (kind = 8) rndnum
+real (kind = 8) assets(grid_asset) 
+real (kind = 8) life_assets(lifespan+1), life_labor(lifespan)
+integer t, curstate, cur_ss
+
+!determine initial state
+call random_seed() !start new random sequence
+call random_number(rndnum) !get a random numbern
+
+
+!Create asset grid
+call linspace(asset_min,asset_max,grid_asset,assets)
+!------------------------------------------
+!For now, initial state is just state 1; 
+!I will update it soon
+curstate = 1
+
+! SOCIAL SECURITY STATE
+!default state of social security for everybody is not applied (ss benefits 0, state is 1); 
+!I'm going to check whether an individual is willing to apply for socual security starting only at age 62
+cur_ss = 1 
+
+!------------------------------------------
+
+
+acur = in_asset !input asset
+life_assets(1) = acur
+aime = in_aime
+workyears = years_aime
+
+do t = 1,lifespan
+
+age = t+49 !actual age of a person
+
+!SOCIAL SECURITY APPLICATION CHOICE 
+if (age>=62 .AND. cur_ss == 1) then !ONLY AFTER THE AGE OF 62 AND IF PERSOD IS NOT RECEIVING BENEFITS ALREADY
+
+endif
+
+
+
+iaprev = locate_greater(assets,acur)-1 !index of closest asset on the grid from below
+ianext = iaprev+1 !index of closest asset on the grid from above
+app = assets(policy(iaprev,curstate,cur_ss,t)) !optimal choice next period on the previous gridpoint
+apn = assets(policy(ianext,curstate,cur_ss,t)) !optimal choice next period on next gridpoint
+apx = linproj(acur,assets(iaprev),assets(ianext),app,apn) !linear intrapolation between points for the optimal choice next period
+lpp = labor(iaprev,curstate,cur_ss,t) !optimal current labor choice on a previous asset gridpoint
+lpn = labor(ianext,curstate,cur_ss,t) !optimal current labor choice on next gridpoint
+lpx = linproj(acur,assets(iaprev),assets(ianext),lpp,lpn) !linear interpolation for optimal choice of labor given current asset (off the grid)
+
+!update for next period
+life_assets(t+1) = apx
+acur = apx
+workyears = workyears+1
+
+enddo
+
+	!Simulation cycle
+
+!do t = 1,lifespan
+!	!First, determine wage, med and health shock corresponding to the current state
+!	w = int(ms(curstate,1))
+!	m = int(ms(curstate,2))
+!	h = int(ms(curstate,3)) !h is either 1 or 2
+	
+!	!Calculate optimal next-period asset
+	
+!	!find next period state
+!	call random_number(rndnum)
+!	nextstate = findlarger(transmat(curstate,:,t),rndnum) ! next state, using probability of transition
+!enddo
+
+end subroutine lc_simulation
+!
+
+
 
