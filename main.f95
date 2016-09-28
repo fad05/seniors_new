@@ -64,6 +64,7 @@ integer ms(statesize,3)
 
 !PROGRAM BODY
 
+
 !-----------------------------------------------------------------------
 !1. Import files
 !1.1. Import coefficients of wage profiles
@@ -242,9 +243,15 @@ subroutine valfun(wage,medexp,transmat,surv,ms,vf,pf,lchoice)
     !dimensions: asset x state x ss x lifespan
     real (kind = 8), dimension(:,:,:,:), intent(out) :: lchoice
 !INTERNAL VARIABLES
-    real (kind = 8) assets(grid_asset), beq(grid_asset), ss(grid_ss), cons, util, opt_labor, val_nomax(grid_asset,grid_asset)
+    real (kind = 8) assets(grid_asset), beq(grid_asset), cons, util, opt_labor, val_nomax(grid_asset,grid_asset)
+    real (kind = 8) ss(grid_ss), extended_ss(grid_ss+1) !ss: spans on positive levls of ss; extended_ss: same positive levels + zero level
     real (kind = 8) lab_cur_next(grid_asset,grid_asset) !labor choice given current and next period asset
     integer i,j,k,l,t,s,w,m,h, age
+    
+!	INTERNAL VAIABLES TO BE MADE EXTERNAL
+	real (kind = 8), dimension(grid_asset,statesize,grid_ss+1,lifespan+1) :: vf_na !value function for those not applied to social security benefits
+	real (kind = 8), dimension(grid_asset,statesize,grid_ss+1,lifespan) :: pf_na !policy function for those not applied to social security benefits
+	real (kind = 8), dimension(grid_asset,statesize,grid_ss+1,lifespan) :: app_policy !each entry is 0-1; application policy!
 
 !BODY OF VALFUN
 !1. Check input and output matrices' dimensions
@@ -351,17 +358,28 @@ subroutine valfun(wage,medexp,transmat,surv,ms,vf,pf,lchoice)
 
 !2.    !create assets grid and social security grid
     call linspace(asset_min,asset_max,grid_asset,assets)
-    call linspace(0.0d0,ss_max,grid_ss,ss)
+    call linspace(ss_min,ss_max,grid_ss,ss)
 
 
-!4. IF INPUTS ARE CORRECT, CALCULATE VALUE FUNCTION BY BACKWARDS INDUCTION
+!4. IF INPUTS ARE CORRECT, CALCULATE TWO VALUE FUNCTIONS BY BACKWARDS INDUCTION
+!	1)	THE FIRST VALUE FUNCTION (SPANS FROM AGE 62 TO AGE 90) IS CALCULATED FOR THOSE WHO HAVE APPLIED FOR SOCIAL
+!		SECURITY AND RECEIVE FIXED AMOUNT EVERY YEAR. WE HAVE TO CALCULATE IT FIRST, AS IT IS NEEDED TO CALCULATE THE SECOND ONE.
+!	2)	THE SECOND VALUE FUNCTION IS FOR THSE WHO ARE STILL NOT APPLIED FOR SS BENEFITS. IT HAS TO CONTAIN ADDITIONAL DIMENSION:
+!		FOR EVERY COMBINATION OF CURRENT SHOCK (WAGE, HEALTH, MEDICINE), CURRENT ASSET LEVEL, AND CURRENT "POTENTIAL" BENEFIT LEVEL
+!		(NAMELY, THE AMOUNT OF BENEFITS ONE WILL RECEIVE IF APPLIES TODAY) IT CONTAINS A 0-1 DECISION WHETHER TO APPLY FOR SS OR NOT.
+!		THIS ACTS AS AN INDICATOR OF MOVING TO ANOTHER REGIME ("REGIME WITH BENEFITS"). tHIS VALUE FUNCTION SPANS FROM AGE 50 TO AGE 90,
+!		BUT ONE CAN APPLY NOT EARLIER THAN AGE 62.
 
-    !bequests depending on assets, scaled properly
-    !EXPRESS assets and d in 1000's of USD
+!	bequests depending on assets, scaled properly
+!	EXPRESS assets and d in 1000's of USD
     beq = eta*((assets+d)/scale_factor)**(1-sigma)/(1-sigma)
+    
+!	1) FIRST VALUE FUNCTION
     !Value function next period has two dimensions: possible CURRENT assets and CURRENT state of the world:
-    !a combination of wage shock, med expenditure shock and health.
-    !Every particular combination of current asset and current shock in equilibrium define an optimal behavior.
+    !a combination of wage shock, med expenditure shock and health, and current social security level.
+    !For the second value function, I'm going to interpolate between levels to estimate social security at points off the grid.
+    
+    !Every particular combination of current asset, current shock and ss level shock in equilibrium define an optimal behavior.
     !Namely, optimal choice of next period assets, labor supply and consumption. These choices define current utility, and,
     !together with transition probabilities from current state, next period expected utility. Combination of these two define value function.
 
@@ -375,11 +393,13 @@ subroutine valfun(wage,medexp,transmat,surv,ms,vf,pf,lchoice)
 			vf(:,s,k,lifespan+1) = beq !at age 91, when dead; for every state and every level of social security is the same
 		enddo
     enddo
+    
     !initialize vf and pf
     vf = -101
     pf = -102
     !MAIN ITERATION CYCLE
-    do t = lifespan,1,-1 !for each age 90 to 50
+    vf(:,:,:,1:12) = -1.0d5 !no values until age 62
+    do t = lifespan,13,-1 !for each age 90 to 62
 		age = t+49
 		do k = 1,grid_ss !for each grid level of social security
 	        do s = 1,statesize !for every possible state
@@ -393,7 +413,7 @@ subroutine valfun(wage,medexp,transmat,surv,ms,vf,pf,lchoice)
 	                    !First, calculate optimal labor choice
 						call labchoice(opt_labor, cons, util, assets(i),assets(j),h,wage(t,w),medexp(t,h,m),ss(k))
 	                    lab_cur_next(i,j) = opt_labor
-	                    print *, opt_labor
+	                    !print *, opt_labor
 
 	                    !unmaxed "value function"
 	                    val_nomax(i,j) = util + beta*(surv(t,h)*dot_product(vf(j,:,k,t+1),transmat(s,:,t)) &
@@ -402,22 +422,69 @@ subroutine valfun(wage,medexp,transmat,surv,ms,vf,pf,lchoice)
 	            enddo
 	            vf(:,s,k,t) = maxval(val_nomax,2)
 	            pf(:,s,k,t) = maxloc(val_nomax,2)
-	            if (age <= 60) then
-		            do l = 1,grid_asset
-						print *, val_nomax(l,1), val_nomax(l,2), val_nomax(l,3), val_nomax(l,4), val_nomax(l,5), val_nomax(l,6), &
-								val_nomax(l,7), val_nomax(l,8),  val_nomax(l,9),val_nomax(l,10)
-		            enddo
-		            do l = 1,grid_asset
-						print *, vf(l,s,k,t)
-					enddo
-		            do l = 1,grid_asset
-						print *, pf(l,s,k,t)
-					enddo
-				endif
+!	            if (age <= 60) then
+!		            do l = 1,grid_asset
+!						print *, val_nomax(l,1), val_nomax(l,2), val_nomax(l,3), val_nomax(l,4), val_nomax(l,5), val_nomax(l,6), &
+!								val_nomax(l,7), val_nomax(l,8),  val_nomax(l,9),val_nomax(l,10)
+!		            enddo
+!		            do l = 1,grid_asset
+!						print *, vf(l,s,k,t)
+!					enddo
+!		            do l = 1,grid_asset
+!						print *, pf(l,s,k,t)
+!					enddo
+!				endif
 	            lchoice(:,s,k,t) = (/(lab_cur_next(l,pf(l,s,k,t)),l=1,grid_asset)/)
 	        enddo
         enddo
     enddo
+!	FIRST VALUE FUNCTION FINISHED
+
+!	2)NOW GIVEN THE FIRST VALUE FUNCTION, WE CAN CALCULATE THE SECOND ONE ALONG WITH THE DECISION RULE:
+!	WHETHER TO APPLY TO SOCIAL SECURITY, A CRUCIAL OBJECT WE'RE INTERESTED IN.
+!	THE SECOND VALUE FUNCTION HAS MORE ELABORATE STRUCTURE. WE NEED A GRID ON SOCIAL SECURITY HERE TO CALCULATE 
+!	CURRENT DECISION BY COMPARISON. tHE DIFFERENCE FROM THE FIRST VALUE FUNCTON IS: IN THE 1ST, WE HAD LEVEL OF SOCIAL SECURITY THAT 
+!	WERE FIXED (IF YOU HAVE 1000USD THIS YEAR, YOU'LL HAVE 1000USD NEXT YEAR). IN THE 2D ONE, WE HAVE TO HAVE 0 AND ALL OTHER LEVELS.
+!	INTERPRETATION IS THIS: EACH LEVEL SHOWS A "POSSIBLE" BENEFIT THAT INDIVIDUAL WILL RECEIVE IF HE APPLIES RIGHT NOW. IT IS POSSIBLE THAT 
+!	UNDER CERTAIN CONDITIONS INDIVIDUALS HAVE 0 CURRENT POSSIBLE BENEFITS (SAY, THEY DIDN'T WORK ENOUGH WORKING YEARS TO QUALIFY FOR THEM).
+!	SO WHAT WE DO IS FOR EVERY SS GRID POINT, EVERY CURRENT LEVEL OF ASSET, EVERY STATE AND EVERY YEAR WE ESTIMATE WEIGTHED AVERAGE OF
+!	NEXT-YEAR POSSIBILITIES.
+!	EXAMPLE:   assume current shock is S, current asset is A, current "possible" level of benefits B, current age is AGE. Then, the utility in the case
+!	i choose to apply for the benefit is just vf(A,S,B,AGE). But which is the utility if i choose not to apply? Well, current utility is sum of contemporaneous 
+!	utility and continuation value. Continuation value is maximum of expected values (expectation is taken over possible state realizations)
+!	of not applying next period again (but having updated B'; we calculate averages of vf(A',:,B',AGE+1)) or applying next period (weighted average of vf_na(A',:,B',AGE+1)). 
+!	Given current realization of wage, we know exactly which B' we will have next period.
+	
+	vf_na(:,:,:,lifespan+1) = vf(:,:,:,lifespan+1) !upon death, the two value functions are identical
+	extended_ss(1) = 0.0d0
+	extended_ss(2:grid_ss+1) = ss ! create extended grid
+	
+	do t = lifespan,1,-1 !for the whole life
+		age = t+49 !real age
+		do k = 1,grid_ss+1
+			do s = 1,statesize !for every possible state
+				!here, determine wage, med and health shock corresponding to the current state
+	            w = int(ms(s,1))
+	            m = int(ms(s,2))
+	            h = int(ms(s,3)) !h is either 1 or 2
+				!over all possible combinations of assets:
+	            do j = 1,grid_asset     !next-period assets
+					do i = 1,grid_asset !current assets
+						!First, calculate optimal labor choice WITH 0 social security: "what if I don't apply?"
+						call labchoice(opt_labor, cons, util, assets(i),assets(j),h,wage(t,w),medexp(t,h,m),0.0d0)
+	                    lab_cur_next(i,j) = opt_labor
+	                    !unmaxed "value function"
+	                    !NOW, HERE ARE THE BIG DIFFERENCES BETWEEN THIS VF AND THE FIRST ONE
+	                    
+	                    val_nomax(i,j) = util + beta*(surv(t,h)*dot_product(vf_na(j,:,k,t+1),transmat(s,:,t)) &
+	                                + (1-surv(t,h))*beq(j))
+					enddo
+	            enddo	            
+			enddo
+		enddo
+	enddo
+	
+!	SECOND VALUE FUNCTION FINISHED	
     return
 end subroutine valfun
 
@@ -476,8 +543,8 @@ do t = 1,lifespan
 age = t+49 !actual age of a person
 
 !SOCIAL SECURITY APPLICATION CHOICE 
-if (age>=62 .AND. cur_ss == 1) then !ONLY AFTER THE AGE OF 62 AND IF PERSOD IS NOT RECEIVING BENEFITS ALREADY
-
+if (age>=62 .AND. cur_ss == 1) then !ONLY AFTER THE AGE OF 62 AND IF PERSON IS NOT RECEIVING BENEFITS ALREADY
+!WE HAVE TO FIND TWO POINTS ON SS GRID CLOSEST TO CURRENT SS BENEFITS AVAILABLE TO AN INDIVIDUAL
 endif
 
 
