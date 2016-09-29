@@ -244,14 +244,19 @@ subroutine valfun(wage,medexp,transmat,surv,ms,vf,pf,lchoice)
     real (kind = 8), dimension(:,:,:,:), intent(out) :: lchoice
 !INTERNAL VARIABLES
     real (kind = 8) assets(grid_asset), beq(grid_asset), cons, util, opt_labor, val_nomax(grid_asset,grid_asset)
-    real (kind = 8) ss(grid_ss), extended_ss(grid_ss+1) !ss: spans on positive levls of ss; extended_ss: same positive levels + zero level
+    real (kind = 8) ss(grid_ss) !ss: spans on ALL levls of ss INCLUDING 0
     real (kind = 8) lab_cur_next(grid_asset,grid_asset) !labor choice given current and next period asset
-    integer i,j,k,l,t,s,w,m,h, age
+    integer i,j,k,l,t,s,w,m,h, age, st
+    real (kind = 8) b, bnext !variables to contain current value of ss (on the grid) and next period (calculated by formula)
+    integer ibprev, ibnext !indices of the interval points on ss grid within which lies calculated next-period benefit 
+    real (kind = 8) vf_na_interp(grid_ss) !container for interpolated value function
+    real (kind = 8) val_max(grid_asset)
     
 !	INTERNAL VAIABLES TO BE MADE EXTERNAL
-	real (kind = 8), dimension(grid_asset,statesize,grid_ss+1,lifespan+1) :: vf_na !value function for those not applied to social security benefits
-	real (kind = 8), dimension(grid_asset,statesize,grid_ss+1,lifespan) :: pf_na !policy function for those not applied to social security benefits
-	real (kind = 8), dimension(grid_asset,statesize,grid_ss+1,lifespan) :: app_policy !each entry is 0-1; application policy!
+	real (kind = 8), dimension(grid_asset,statesize,grid_ss,lifespan+1) :: vf_na !value function for those not applied to social security benefits
+	real (kind = 8), dimension(grid_asset,statesize,grid_ss,lifespan) :: pf_na !policy function for those not applied to social security benefits
+	real (kind = 8), dimension(grid_asset,statesize,grid_ss,lifespan) :: app_policy !each entry is 0-1; application policy!
+	
 
 !BODY OF VALFUN
 !1. Check input and output matrices' dimensions
@@ -358,7 +363,7 @@ subroutine valfun(wage,medexp,transmat,surv,ms,vf,pf,lchoice)
 
 !2.    !create assets grid and social security grid
     call linspace(asset_min,asset_max,grid_asset,assets)
-    call linspace(ss_min,ss_max,grid_ss,ss)
+    call linspace(0.0d0,ss_max,grid_ss,ss)
 
 
 !4. IF INPUTS ARE CORRECT, CALCULATE TWO VALUE FUNCTIONS BY BACKWARDS INDUCTION
@@ -443,25 +448,28 @@ subroutine valfun(wage,medexp,transmat,surv,ms,vf,pf,lchoice)
 !	2)NOW GIVEN THE FIRST VALUE FUNCTION, WE CAN CALCULATE THE SECOND ONE ALONG WITH THE DECISION RULE:
 !	WHETHER TO APPLY TO SOCIAL SECURITY, A CRUCIAL OBJECT WE'RE INTERESTED IN.
 !	THE SECOND VALUE FUNCTION HAS MORE ELABORATE STRUCTURE. WE NEED A GRID ON SOCIAL SECURITY HERE TO CALCULATE 
-!	CURRENT DECISION BY COMPARISON. tHE DIFFERENCE FROM THE FIRST VALUE FUNCTON IS: IN THE 1ST, WE HAD LEVEL OF SOCIAL SECURITY THAT 
-!	WERE FIXED (IF YOU HAVE 1000USD THIS YEAR, YOU'LL HAVE 1000USD NEXT YEAR). IN THE 2D ONE, WE HAVE TO HAVE 0 AND ALL OTHER LEVELS.
+!	CURRENT DECISION BY COMPARISON. THE DIFFERENCE FROM THE FIRST VALUE FUNCTON IS: IN THE 1ST, WE HAD LEVEL OF SOCIAL SECURITY THAT 
+!	WERE FIXED (IF YOU HAVE 1000USD THIS YEAR, YOU'LL HAVE 1000USD NEXT YEAR). IN THE 2D ONE, WE HAVE TO HAVE ALL LEVELS AS WELL.
 !	INTERPRETATION IS THIS: EACH LEVEL SHOWS A "POSSIBLE" BENEFIT THAT INDIVIDUAL WILL RECEIVE IF HE APPLIES RIGHT NOW. IT IS POSSIBLE THAT 
 !	UNDER CERTAIN CONDITIONS INDIVIDUALS HAVE 0 CURRENT POSSIBLE BENEFITS (SAY, THEY DIDN'T WORK ENOUGH WORKING YEARS TO QUALIFY FOR THEM).
 !	SO WHAT WE DO IS FOR EVERY SS GRID POINT, EVERY CURRENT LEVEL OF ASSET, EVERY STATE AND EVERY YEAR WE ESTIMATE WEIGTHED AVERAGE OF
 !	NEXT-YEAR POSSIBILITIES.
 !	EXAMPLE:   assume current shock is S, current asset is A, current "possible" level of benefits B, current age is AGE. Then, the utility in the case
 !	i choose to apply for the benefit is just vf(A,S,B,AGE). But which is the utility if i choose not to apply? Well, current utility is sum of contemporaneous 
-!	utility and continuation value. Continuation value is maximum of expected values (expectation is taken over possible state realizations)
-!	of not applying next period again (but having updated B'; we calculate averages of vf(A',:,B',AGE+1)) or applying next period (weighted average of vf_na(A',:,B',AGE+1)). 
-!	Given current realization of wage, we know exactly which B' we will have next period.
+!	utility and continuation value. Continuation value is just discounted value function next period. 
+!	Note that in the last period T everybody applies to ss no mater what. Then, the two value functions are identical in the last period for every possible B (social security). 
+!	In the period T-1, however, there are two possibilities: apply now with current B and switch to the first value function with this B, or don't apply
+!	and next period receive B' = F(B) (B'  is a function of B which is a function of AIME; AIME' =  AIME + max{0,(wl-AIME)/35} if a person worked more than 35 years, and
+!	AIME' = (AIME+wl)/35 if individual worked less; for now i assume that at age 62 everybody worked at least 35 years). We calculate both these scenarios (the "application" 
+!	scenario is already calculated in the first vf), and choose the one that grants higher utility (setting ss policy to 0 or 1 accordingly), and thus second VF ths period is calculated.  
 	
 	vf_na(:,:,:,lifespan+1) = vf(:,:,:,lifespan+1) !upon death, the two value functions are identical
-	extended_ss(1) = 0.0d0
-	extended_ss(2:grid_ss+1) = ss ! create extended grid
+	app_policy = 0 !initialize application policy
+	app_policy(:,:,:,lifespan) = 1 ! We claim that in the last period of life everybody applies for ss with certainty
 	
 	do t = lifespan,1,-1 !for the whole life
 		age = t+49 !real age
-		do k = 1,grid_ss+1
+		do k = 1,grid_ss
 			do s = 1,statesize !for every possible state
 				!here, determine wage, med and health shock corresponding to the current state
 	            w = int(ms(s,1))
@@ -475,11 +483,33 @@ subroutine valfun(wage,medexp,transmat,surv,ms,vf,pf,lchoice)
 	                    lab_cur_next(i,j) = opt_labor
 	                    !unmaxed "value function"
 	                    !NOW, HERE ARE THE BIG DIFFERENCES BETWEEN THIS VF AND THE FIRST ONE
-	                    
-	                    val_nomax(i,j) = util + beta*(surv(t,h)*dot_product(vf_na(j,:,k,t+1),transmat(s,:,t)) &
+	                    !first, we calculate next-period B (it's going to be off the grid), and use linear interpolation to calculate
+	                    !value functions between points of B. Then we have to take expectation of these interpolations.
+	                    b = ss(k)
+	                    bnext = 1.1*b !INSERT CORRECT FORMULA HERE!!!
+	                    !bnext lies between ss(ibprev) and ss(ibnext), we need to find these
+	                    ibprev = locate_greater(ss,bnext)-1 !index of a previous gridpoint
+	                    ibnext = ibprev+1 !index of a next gridpoint
+	                    !Calculate set of interpolations for next-period vf_na: one interpolation for every state s
+	                    do st = 1,statesize
+							vf_na_interp(st) = linproj(bnext,ss(ibprev),ss(ibnext),vf_na(j,st,ibprev,t+1),vf_na(j,st,ibnext,t+1)) !vf_na(j - next period asset, st - next-period state,ib.. - indices of ss, t+1 - priod)
+	                    enddo
+
+	                    val_nomax(i,j) = util + beta*(surv(t,h)*dot_product(vf_na_interp,transmat(s,:,t)) &
 	                                + (1-surv(t,h))*beq(j))
 					enddo
-	            enddo	            
+	            enddo
+	            !Now, calculate vf_na; notice the difference!
+				val_max = maxval(val_nomax,2)
+				pf_na(:,s,k,t) = maxloc(val_nomax,2)
+				where (vf(:,s,k,t) >= val_max) !ss application grants higher utility
+					vf_na(:,s,k,t) = vf(:,s,k,t) 
+					app_policy(:,s,k,t) = 1	!individual applies for ss, indicator of regime swithing
+				elsewhere
+					vf_na(:,s,k,t) = val_max 
+					app_policy(:,s,k,t) = 0 !individual doesn't apply
+				endwhere
+	            
 			enddo
 		enddo
 	enddo
