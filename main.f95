@@ -8,18 +8,23 @@ implicit none
 
 
 interface
-subroutine valfun(wage,medexp,transmat,surv,ms,vf,pf,lchoice)
+subroutine valfun(cohort,wage,medexp,transmat,surv,ms,vf,pf,lchoice)
     use parameters
+    use procedures
     implicit none
-    real (kind = 8), dimension(:,:), intent(in) :: wage, surv
-    real (kind = 8), dimension(:,:,:), intent(in) :: medexp, transmat
+    integer, intent(in) :: cohort
+    real (kind = 8), dimension(lifespan,nwagebins), intent(in) :: wage
+    real (kind = 8), dimension(lifespan,nhealth), intent(in) :: surv
+    real (kind = 8), dimension(lifespan,nhealth,nmedbins), intent(in) :: medexp
+    real (kind = 8), dimension(statesize,statesize,lifespan-1), intent(in) :: transmat
     integer, dimension(statesize,3), intent(in) :: ms
-    real (kind = 8), dimension(:,:,:,:), intent(out) :: vf
-    integer, dimension(:,:,:,:), intent(out) :: pf
-    real (kind = 8), dimension(:,:,:,:), intent(out) :: lchoice
+    real (kind = 8), dimension(grid_asset,statesize,grid_ss,lifespan+1), intent(out) :: vf
+    integer, dimension(grid_asset,statesize,grid_ss,lifespan), intent(out) :: pf
+    real (kind = 8), dimension(grid_asset,statesize,grid_ss,lifespan), intent(out) :: lchoice
 end subroutine valfun
 subroutine labchoice (lchoice, cons, util, acur,anext, h, wage, mexp)
     use parameters
+    use procedures
     implicit none
     real (kind = 8), intent(in) :: acur, anext, wage,mexp !current assets, next period assets, current wage, mexp
     integer, intent(in) :: h !health status, 1 or 2
@@ -29,6 +34,7 @@ subroutine labchoice (lchoice, cons, util, acur,anext, h, wage, mexp)
 end subroutine labchoice
 subroutine lc_simulation(in_asset,in_aime, years_aime,transmat,valfun,policy,labor)
 	use parameters
+	use procedures
 	real (kind = 8), intent(in) :: in_asset, in_aime, years_aime
 	real (kind = 8), intent(in), dimension(:,:,:,:) :: valfun
 	integer, intent(in), dimension(:,:,:,:) :: policy
@@ -63,7 +69,6 @@ integer ms(statesize,3)
 
 
 !PROGRAM BODY
-
 
 !-----------------------------------------------------------------------
 !1. Import files
@@ -214,7 +219,7 @@ ind_type = 1
 !labor choice
 lchoice = -10
 !value function
-call valfun(wages(:,:,ind_type),medexp(:,:,:,ind_type),transmat(:,:,:,ind_type),surv(:,:,ind_type),ms,vf,pf,lchoice)
+call valfun(1,wages(:,:,ind_type),medexp(:,:,:,ind_type),transmat(:,:,:,ind_type),surv(:,:,ind_type),ms,vf,pf,lchoice)
 
 call lc_simulation(2.0d5,1.0d3,1.5d1,transmat(:,:,:,ind_type),vf,pf,lchoice)
 !		END TESTING
@@ -223,39 +228,36 @@ end
 !End of main program
 !========================================================================
 !Local subroutines
-subroutine valfun(wage,medexp,transmat,surv,ms,vf,pf,lchoice)
+subroutine valfun(cohort,wage,medexp,transmat,surv,ms,vf,pf,lchoice)
     use parameters
     use procedures
     implicit none
 !INPUTS AND OUTPUTS
-    !dimensions, wage: lifespan x nwagebins
-    !dimensions, surv: lifespan x 2 (health)
-    real (kind = 8), dimension(:,:), intent(in) :: wage, surv
-    !dimensions: lifespan x 2 (health) x nmedbins: medexp
-    !dimensions: statesize x statesize x lifespan
-    real (kind = 8), dimension(:,:,:), intent(in) :: medexp, transmat
-    !dimensions: statesize x 3
+	integer, intent(in) :: cohort
+    real (kind = 8), dimension(lifespan,nwagebins), intent(in) :: wage
+    real (kind = 8), dimension(lifespan,nhealth), intent(in) :: surv
+    real (kind = 8), dimension(lifespan,nhealth,nmedbins), intent(in) :: medexp
+    real (kind = 8), dimension(statesize,statesize,lifespan-1), intent(in) :: transmat
     integer, dimension(statesize,3), intent(in) :: ms
-    !dimensions: asset x state x ss x lifespan+1
-    real (kind = 8), dimension(:,:,:,:), intent(out) :: vf
-    !dimensions: asset x state x ss x lifespan
-    integer, dimension(:,:,:,:), intent(out) :: pf
-    !dimensions: asset x state x ss x lifespan
-    real (kind = 8), dimension(:,:,:,:), intent(out) :: lchoice
+    real (kind = 8), dimension(grid_asset,statesize,grid_ss,lifespan+1), intent(out) :: vf
+    integer, dimension(grid_asset,statesize,grid_ss,lifespan), intent(out) :: pf
+    real (kind = 8), dimension(grid_asset,statesize,grid_ss,lifespan), intent(out) :: lchoice
 !INTERNAL VARIABLES
     real (kind = 8) assets(grid_asset), beq(grid_asset), cons, util, opt_labor, val_nomax(grid_asset,grid_asset)
+    real (kind = 8) val_nomax_na(grid_asset,grid_asset)
     real (kind = 8) ss(grid_ss) !ss: spans on ALL levls of ss INCLUDING 0
-    real (kind = 8) lab_cur_next(grid_asset,grid_asset) !labor choice given current and next period asset
-    integer i,j,k,l,t,s,w,m,h, age, st
-    real (kind = 8) b, bnext !variables to contain current value of ss (on the grid) and next period (calculated by formula)
+    real (kind = 8) lab_cur_next(grid_asset,grid_asset), lab_cur_next_na(grid_asset,grid_asset)  !labor choice given current and next period asset
+    integer i,j,k,l,t,s,w,m,h, age, st, bcalc
+    real (kind = 8) b, bnext, aime, aime_next !variables to contain current value of ss (on the grid) and next period (calculated by formula), as well as AIMEs
     integer ibprev, ibnext !indices of the interval points on ss grid within which lies calculated next-period benefit 
-    real (kind = 8) vf_na_interp(grid_ss) !container for interpolated value function
-    real (kind = 8) val_max(grid_asset)
+    real (kind = 8) vf_na_interp(statesize) !container for interpolated value function
+    real (kind = 8) val_max_na(grid_asset) !technical variable, maxed vf_na BEFORE comparison vith vf
     
 !	INTERNAL VAIABLES TO BE MADE EXTERNAL
-	real (kind = 8), dimension(grid_asset,statesize,grid_ss,lifespan+1) :: vf_na !value function for those not applied to social security benefits
-	real (kind = 8), dimension(grid_asset,statesize,grid_ss,lifespan) :: pf_na !policy function for those not applied to social security benefits
-	real (kind = 8), dimension(grid_asset,statesize,grid_ss,lifespan) :: app_policy !each entry is 0-1; application policy!
+!	note the last dimension is "2", which signifies the way we update next period benefits
+	real (kind = 8), dimension(grid_asset,statesize,grid_ss,lifespan+1,2) :: vf_na !value function for those not applied to social security benefits
+	real (kind = 8), dimension(grid_asset,statesize,grid_ss,lifespan,2) :: pf_na !policy function for those not applied to social security benefits
+	real (kind = 8), dimension(grid_asset,statesize,grid_ss,lifespan,2) :: app_policy !each entry is 0-1; application policy!
 	
 
 !BODY OF VALFUN
@@ -463,56 +465,78 @@ subroutine valfun(wage,medexp,transmat,surv,ms,vf,pf,lchoice)
 !	AIME' = (AIME+wl)/35 if individual worked less; for now i assume that at age 62 everybody worked at least 35 years). We calculate both these scenarios (the "application" 
 !	scenario is already calculated in the first vf), and choose the one that grants higher utility (setting ss policy to 0 or 1 accordingly), and thus second VF ths period is calculated.  
 	
-	vf_na(:,:,:,lifespan+1) = vf(:,:,:,lifespan+1) !upon death, the two value functions are identical
+	vf_na(:,:,:,lifespan+1,1) = vf(:,:,:,lifespan+1) !upon death, the two value functions are identical
+	vf_na(:,:,:,lifespan+1,2) = vf(:,:,:,lifespan+1)
 	app_policy = 0 !initialize application policy
-	app_policy(:,:,:,lifespan) = 1 ! We claim that in the last period of life everybody applies for ss with certainty
+	app_policy(:,:,:,lifespan,:) = 1 ! We claim that in the last period of life everybody applies for ss with certainty
 	
-	do t = lifespan,1,-1 !for the whole life
-		age = t+49 !real age
-		do k = 1,grid_ss
-			do s = 1,statesize !for every possible state
-				!here, determine wage, med and health shock corresponding to the current state
-	            w = int(ms(s,1))
-	            m = int(ms(s,2))
-	            h = int(ms(s,3)) !h is either 1 or 2
-				!over all possible combinations of assets:
-	            do j = 1,grid_asset     !next-period assets
-					do i = 1,grid_asset !current assets
-						!First, calculate optimal labor choice WITH 0 social security: "what if I don't apply?"
-						call labchoice(opt_labor, cons, util, assets(i),assets(j),h,wage(t,w),medexp(t,h,m),0.0d0)
-	                    lab_cur_next(i,j) = opt_labor
-	                    !unmaxed "value function"
-	                    !NOW, HERE ARE THE BIG DIFFERENCES BETWEEN THIS VF AND THE FIRST ONE
-	                    !first, we calculate next-period B (it's going to be off the grid), and use linear interpolation to calculate
-	                    !value functions between points of B. Then we have to take expectation of these interpolations.
-	                    b = ss(k)
-	                    bnext = 1.1*b !INSERT CORRECT FORMULA HERE!!!
-	                    !bnext lies between ss(ibprev) and ss(ibnext), we need to find these
-	                    ibprev = locate_greater(ss,bnext)-1 !index of a previous gridpoint
-	                    ibnext = ibprev+1 !index of a next gridpoint
-	                    !Calculate set of interpolations for next-period vf_na: one interpolation for every state s
-	                    do st = 1,statesize
-							vf_na_interp(st) = linproj(bnext,ss(ibprev),ss(ibnext),vf_na(j,st,ibprev,t+1),vf_na(j,st,ibnext,t+1)) !vf_na(j - next period asset, st - next-period state,ib.. - indices of ss, t+1 - priod)
-	                    enddo
-
-	                    val_nomax(i,j) = util + beta*(surv(t,h)*dot_product(vf_na_interp,transmat(s,:,t)) &
-	                                + (1-surv(t,h))*beq(j))
-					enddo
-	            enddo
-	            !Now, calculate vf_na; notice the difference!
-				val_max = maxval(val_nomax,2)
-				pf_na(:,s,k,t) = maxloc(val_nomax,2)
-				where (vf(:,s,k,t) >= val_max) !ss application grants higher utility
-					vf_na(:,s,k,t) = vf(:,s,k,t) 
-					app_policy(:,s,k,t) = 1	!individual applies for ss, indicator of regime swithing
-				elsewhere
-					vf_na(:,s,k,t) = val_max 
-					app_policy(:,s,k,t) = 0 !individual doesn't apply
-				endwhere
-	            
-			enddo
-		enddo
-	enddo
+	do bcalc = 1,2 
+		!bcalc = 1: we calculate "next period" benefits as if person has less than 35 working years
+		!bcalc = 2: calculate bnext as if an individual has more than 35 working years
+		do t = lifespan,1,-1 !for the whole life
+			age = t+49 !real age
+			do k = 1,grid_ss
+				do s = 1,statesize !for every possible state
+					!here, determine wage, med and health shock corresponding to the current state
+		            w = int(ms(s,1))
+		            m = int(ms(s,2))
+		            h = int(ms(s,3)) !h is either 1 or 2
+					!over all possible combinations of assets:
+		            do j = 1,grid_asset     !next-period assets
+						do i = 1,grid_asset !current assets
+							!First, calculate optimal labor choice WITH 0 social security: "what if I don't apply?"
+							call labchoice(opt_labor, cons, util, assets(i),assets(j),h,wage(t,w),medexp(t,h,m),0.0d0)
+		                    lab_cur_next_na(i,j) = opt_labor
+		                    !unmaxed "value function"
+		                    
+		                    !NOW, HERE ARE THE BIG DIFFERENCES BETWEEN THIS VF AND THE FIRST ONE
+		                    !First, we calculate next-period B (it's going to be off the grid), and use linear interpolation to calculate
+		                    !value functions between points of B. Then we have to take expectation of these interpolations.
+		                    !On top of that, we need to control for application age: an individual can't apply if she's younger than 62
+		                    
+		                    !current benefit, in monetary terms
+		                    b = ss(k) 
+		                    !current AIME, in monetary terms		                    
+		                    call aime_calc(cohort,age,b,aime)
+		                    
+		                    !update AIMe for next period
+		                    if (bcalc == 1) then !individual worked less than 35 years
+								aime_next = aime + wage(t,w)*opt_labor/35.0 		      !next period aime grows              
+		                    else !individual aready has more than 35 working years
+								aime_next = aime + max(0.0,(wage(t,w)*opt_labor-aime)/35.0) !next-period aime doesn't decline
+		                    endif
+		                    
+		                    !calculate next period benefit using proper age and aime NEXT PERIOD
+		                    call benefit_calc(cohort,age+1,aime_next,bnext)
+		                    
+		                    !bnext lies between ss(ibprev) and ss(ibnext), we need to find these
+		                    ibprev = locate_greater(ss,bnext)-1 !index of a previous gridpoint
+		                    ibnext = ibprev+1 !index of a next gridpoint
+		                    
+		                    !Calculate set of interpolations for next-period vf_na: one interpolation for every state s
+		                    do st = 1,statesize
+								vf_na_interp(st) = linproj(bnext,ss(ibprev),ss(ibnext),vf_na(j,st,ibprev,t+1,bcalc),vf_na(j,st,ibnext,t+1,bcalc)) !vf_na(j - next period asset, st - next-period state,ib.. - indices of ss, t+1 - priod)
+		                    enddo
+	
+		                    val_nomax_na(i,j) = util + beta*(surv(t,h)*dot_product(vf_na_interp,transmat(s,:,t)) &
+		                                + (1-surv(t,h))*beq(j))
+						enddo
+		            enddo
+		            !Now, calculate vf_na; notice the difference!
+					val_max_na = maxval(val_nomax_na,2)
+					pf_na(:,s,k,t,bcalc) = maxloc(val_nomax_na,2)
+					where (vf(:,s,k,t) >= val_max_na) !ss application grants higher utility
+						vf_na(:,s,k,t,bcalc) = vf(:,s,k,t) 
+						app_policy(:,s,k,t,bcalc) = 1	!individual applies for ss, indicator of regime swithing
+					elsewhere
+						vf_na(:,s,k,t,bcalc) = val_max_na 
+						app_policy(:,s,k,t,bcalc) = 0 !individual doesn't apply
+					endwhere
+		            
+				enddo !do s = 1,statesize
+			enddo !do k = 1,grid_ss
+		enddo !do t = lifespan,1,-1 n
+	enddo ! do bcalc = 1,2
 	
 !	SECOND VALUE FUNCTION FINISHED	
     return
@@ -612,6 +636,75 @@ enddo
 
 end subroutine lc_simulation
 !
+
+subroutine aime_calc(cohort,age,benefit,aime)
+!routine calculates current AIME given current benefit input,
+!cohort (1 or 2) and current age, 
+use parameters
+integer, intent(in) :: cohort, age
+real (kind = 8), intent(in) :: benefit
+real (kind = 8), intent(out) :: aime
+
+!local variables
+real (kind = 8) pia
+
+!First we have to calculate PIA (real value, as if we're at NRA)
+
+if (age<62) then
+	pia = benefit
+elseif (age>=nra(cohort)) then !get full benefit plus whatever bonus (which is only up to age 70)
+	pia = benefit/(1+credit_delret(cohort)*(min(age,70)-nra(cohort)))
+elseif (cohort == 2 .AND. nra(cohort)-age>3) then !62 to 63 for second cohort
+	pia = benefit/(0.8-penalty_long*(nra(cohort)-age-3))
+else !62 to 65 for first cohort, 64 to 67 for second cohort
+	pia = benefit/(1-penalty_er3*(nra(cohort)-age))
+endif
+
+!Once we've calculated PIA, we can calculate AIME
+	
+if (pia <= aime_bend(1,cohort)*0.9) then !lower than firs bendpoint
+	aime = pia/0.9
+elseif (pia > aime_bend(1,cohort)*0.9 .AND. pia <= aime_bend(1,cohort)*0.9 + 0.32*(aime_bend(2,cohort)-aime_bend(1,cohort))) then !between first and second bendpoint
+	aime = (pia - aime_bend(1,cohort)*0.9)/0.32 + aime_bend(1,cohort)
+else !pia > aime_bend(1,cohort)*0.9 + 0.32*(aime_bend(2,cohort)-aime_bend(1,cohort))  : larger than third bendpoint
+	aime = (pia-0.9*aime_bend(1,cohort)-0.32*(aime_bend(2,cohort)-aime_bend(1,cohort)))/0.15+aime_bend(2,cohort)
+endif
+	
+end subroutine	aime_calc 
+
+subroutine benefit_calc(cohort,age,aime,benefit)
+!A reverse of aime_calc: given current aime, age, cohort
+!a procedure calculates correct benefit level.
+use parameters
+integer, intent(in) :: cohort, age
+real (kind = 8), intent(in) :: aime 
+real (kind = 8), intent(out) :: benefit
+
+!local variables
+real (kind = 8) pia
+
+!First, we have to calculate PIA from AIME
+
+if (aime <= aime_bend(1,cohort)) then !less than first bendpoint
+	pia = 0.9*aime !90% of his/her average indexed monthly earnings below the first $aime_bend(1)
+elseif (aime>aime_bend(1,cohort) .AND. aime <=aime_bend(2,cohort)) then !between first and second bendpoint
+	pia = 0.9*aime_bend(1,cohort) + 0.32*(aime-aime_bend(1,cohort)) !90% of the first $aime_bend(1) plus 32 percent of his/her average indexed monthly earnings over $aime_bend(1) and through $aime_bend(2)
+else !aime is over the second bendpoint
+	pia = 0.9*aime_bend(1,cohort) + 0.32*(aime_bend(2,cohort)-aime_bend(1,cohort)) + 0.15*(aime-aime_bend(2,cohort)) !on top of previous, 15% of aime over second bendpoint
+endif
+
+!Second, from PIA we recover benefit level given application age bonuses or penalties
+if (age<62) then
+	benefit = 0 !an individual can't get benefits this early
+elseif (age>=nra(cohort)) then !full benefit plus bonus (bonus is only up to age 70)
+	benefit = pia*(1+credit_delret(cohort)*(min(age,70)-nra(cohort)))
+elseif (cohort == 2 .AND. nra(cohort)-age>3) then !62 to 63 for second cohort
+	benefit = pia*(0.8-penalty_long*(nra(cohort)-age-3))
+else !62 to 65 for first cohort, 64 to 67 for second cohort
+	benefit = pia*(1-penalty_er3*(nra(cohort)-age))
+endif
+
+end subroutine benefit_calc
 
 
 
