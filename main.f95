@@ -256,8 +256,9 @@ subroutine valfun(cohort,wage,medexp,transmat,surv,ms,vf,pf,lchoice)
 !	INTERNAL VAIABLES TO BE MADE EXTERNAL
 !	note the last dimension is "2", which signifies the way we update next period benefits
 	real (kind = 8), dimension(grid_asset,statesize,grid_ss,lifespan+1,2) :: vf_na !value function for those not applied to social security benefits
-	real (kind = 8), dimension(grid_asset,statesize,grid_ss,lifespan,2) :: pf_na !policy function for those not applied to social security benefits
+	integer, dimension(grid_asset,statesize,grid_ss,lifespan,2) :: pf_na !policy function for those not applied to social security benefits
 	real (kind = 8), dimension(grid_asset,statesize,grid_ss,lifespan,2) :: app_policy !each entry is 0-1; application policy!
+	real (kind = 8), dimension(grid_asset,statesize,grid_ss,lifespan,2) :: lchoice_na !labor choice if not applied
 	
 
 !BODY OF VALFUN
@@ -378,8 +379,7 @@ subroutine valfun(cohort,wage,medexp,transmat,surv,ms,vf,pf,lchoice)
 !		BUT ONE CAN APPLY NOT EARLIER THAN AGE 62.
 
 !	bequests depending on assets, scaled properly
-!	EXPRESS assets and d in 1000's of USD
-    beq = eta*((assets+d)/scale_factor)**(1-sigma)/(1-sigma)
+	call bequest_value(assets,beq)
     
 !	1) FIRST VALUE FUNCTION
     !Value function next period has two dimensions: possible CURRENT assets and CURRENT state of the world:
@@ -395,15 +395,18 @@ subroutine valfun(cohort,wage,medexp,transmat,surv,ms,vf,pf,lchoice)
     !No uncertainty here, since everybody dies with certainty after age of 90.
     !Similarly, value function upon death is the same as expected value function upon death (since no uncertainty).
     !value function upon death
+    
+    !initialize vf and pf; if we will observe these numbers after the execution, means something wrong
+    
+    vf = -101
+    pf = -102
+    
     do k = 1,grid_ss
 		do s = 1,statesize
 			vf(:,s,k,lifespan+1) = beq !at age 91, when dead; for every state and every level of social security is the same
 		enddo
     enddo
     
-    !initialize vf and pf
-    vf = -101
-    pf = -102
     !MAIN ITERATION CYCLE
     vf(:,:,:,1:12) = -1.0d5 !no values until age 62
     do t = lifespan,13,-1 !for each age 90 to 62
@@ -465,15 +468,15 @@ subroutine valfun(cohort,wage,medexp,transmat,surv,ms,vf,pf,lchoice)
 !	AIME' = (AIME+wl)/35 if individual worked less; for now i assume that at age 62 everybody worked at least 35 years). We calculate both these scenarios (the "application" 
 !	scenario is already calculated in the first vf), and choose the one that grants higher utility (setting ss policy to 0 or 1 accordingly), and thus second VF ths period is calculated.  
 	
-	vf_na(:,:,:,lifespan+1,1) = vf(:,:,:,lifespan+1) !upon death, the two value functions are identical
-	vf_na(:,:,:,lifespan+1,2) = vf(:,:,:,lifespan+1)
+	vf_na(:,:,:,lifespan:lifespan+1,1) = vf(:,:,:,lifespan:lifespan+1) !upon death and in the last period, the two value functions are identical (everyone applies at age 90 with certainty)
+	vf_na(:,:,:,lifespan:lifespan+1,2) = vf(:,:,:,lifespan:lifespan+1)
 	app_policy = 0 !initialize application policy
 	app_policy(:,:,:,lifespan,:) = 1 ! We claim that in the last period of life everybody applies for ss with certainty
 	
 	do bcalc = 1,2 
 		!bcalc = 1: we calculate "next period" benefits as if person has less than 35 working years
 		!bcalc = 2: calculate bnext as if an individual has more than 35 working years
-		do t = lifespan,1,-1 !for the whole life
+		do t = lifespan-1,1,-1 !age 89 to 50
 			age = t+49 !real age
 			do k = 1,grid_ss
 				do s = 1,statesize !for every possible state
@@ -487,7 +490,6 @@ subroutine valfun(cohort,wage,medexp,transmat,surv,ms,vf,pf,lchoice)
 							!First, calculate optimal labor choice WITH 0 social security: "what if I don't apply?"
 							call labchoice(opt_labor, cons, util, assets(i),assets(j),h,wage(t,w),medexp(t,h,m),0.0d0)
 		                    lab_cur_next_na(i,j) = opt_labor
-		                    !unmaxed "value function"
 		                    
 		                    !NOW, HERE ARE THE BIG DIFFERENCES BETWEEN THIS VF AND THE FIRST ONE
 		                    !First, we calculate next-period B (it's going to be off the grid), and use linear interpolation to calculate
@@ -499,7 +501,7 @@ subroutine valfun(cohort,wage,medexp,transmat,surv,ms,vf,pf,lchoice)
 		                    !current AIME, in monetary terms		                    
 		                    call aime_calc(cohort,age,b,aime)
 		                    
-		                    !update AIMe for next period
+		                    !update AIME for next period
 		                    if (bcalc == 1) then !individual worked less than 35 years
 								aime_next = aime + wage(t,w)*opt_labor/35.0 		      !next period aime grows              
 		                    else !individual aready has more than 35 working years
@@ -525,14 +527,38 @@ subroutine valfun(cohort,wage,medexp,transmat,surv,ms,vf,pf,lchoice)
 		            !Now, calculate vf_na; notice the difference!
 					val_max_na = maxval(val_nomax_na,2)
 					pf_na(:,s,k,t,bcalc) = maxloc(val_nomax_na,2)
-					where (vf(:,s,k,t) >= val_max_na) !ss application grants higher utility
-						vf_na(:,s,k,t,bcalc) = vf(:,s,k,t) 
-						app_policy(:,s,k,t,bcalc) = 1	!individual applies for ss, indicator of regime swithing
-					elsewhere
-						vf_na(:,s,k,t,bcalc) = val_max_na 
-						app_policy(:,s,k,t,bcalc) = 0 !individual doesn't apply
-					endwhere
-		            
+					lchoice_na(:,s,k,t,bcalc) = (/(lab_cur_next_na(l,pf_na(l,s,k,t,bcalc)),l=1,grid_asset)/)
+					
+!					if (age == 90 .AND. k == 3 .AND. s == 7) then
+!						read (*,*)
+!					endif
+					!If age is larger or equal than 62, an individual CAN apply for socal security.
+
+					if (age>=62) then
+!						print *, vf(:,s,k,t)
+!						print *, val_max_na
+!						print *, app_policy(:,s,k,t,bcalc)
+!						print *, lchoice_na(:,s,k,t,bcalc)
+!						print *, lchoice(:,s,k,t)
+!						print *, vf_na(:,s,k,t,bcalc)
+						where (vf(:,s,k,t) >= val_max_na) !ss application grants higher utility
+							vf_na(:,s,k,t,bcalc) = vf(:,s,k,t) 
+							app_policy(:,s,k,t,bcalc) = 1	!individual applies for ss, indicator of regime swithing
+							lchoice_na(:,s,k,t,bcalc) = lchoice(:,s,k,t)
+						elsewhere
+							vf_na(:,s,k,t,bcalc) = val_max_na 
+							app_policy(:,s,k,t,bcalc) = 0 !individual doesn't apply
+						endwhere
+		            else !individual doesn't apply
+						vf_na(:,s,k,t,bcalc) = val_max_na
+						app_policy(:,s,k,t,bcalc) = 0 
+		            endif
+!					print *, vf(:,s,k,t)
+!					print *, val_max_na
+!					print *, app_policy(:,s,k,t,bcalc)
+!					print *, lchoice_na(:,s,k,t,bcalc)
+!					print *, lchoice(:,s,k,t)
+!					print *, vf_na(:,s,k,t,bcalc)
 				enddo !do s = 1,statesize
 			enddo !do k = 1,grid_ss
 		enddo !do t = lifespan,1,-1 n
@@ -635,76 +661,6 @@ enddo
 !enddo
 
 end subroutine lc_simulation
-!
-
-subroutine aime_calc(cohort,age,benefit,aime)
-!routine calculates current AIME given current benefit input,
-!cohort (1 or 2) and current age, 
-use parameters
-integer, intent(in) :: cohort, age
-real (kind = 8), intent(in) :: benefit
-real (kind = 8), intent(out) :: aime
-
-!local variables
-real (kind = 8) pia
-
-!First we have to calculate PIA (real value, as if we're at NRA)
-
-if (age<62) then
-	pia = benefit
-elseif (age>=nra(cohort)) then !get full benefit plus whatever bonus (which is only up to age 70)
-	pia = benefit/(1+credit_delret(cohort)*(min(age,70)-nra(cohort)))
-elseif (cohort == 2 .AND. nra(cohort)-age>3) then !62 to 63 for second cohort
-	pia = benefit/(0.8-penalty_long*(nra(cohort)-age-3))
-else !62 to 65 for first cohort, 64 to 67 for second cohort
-	pia = benefit/(1-penalty_er3*(nra(cohort)-age))
-endif
-
-!Once we've calculated PIA, we can calculate AIME
-	
-if (pia <= aime_bend(1,cohort)*0.9) then !lower than firs bendpoint
-	aime = pia/0.9
-elseif (pia > aime_bend(1,cohort)*0.9 .AND. pia <= aime_bend(1,cohort)*0.9 + 0.32*(aime_bend(2,cohort)-aime_bend(1,cohort))) then !between first and second bendpoint
-	aime = (pia - aime_bend(1,cohort)*0.9)/0.32 + aime_bend(1,cohort)
-else !pia > aime_bend(1,cohort)*0.9 + 0.32*(aime_bend(2,cohort)-aime_bend(1,cohort))  : larger than third bendpoint
-	aime = (pia-0.9*aime_bend(1,cohort)-0.32*(aime_bend(2,cohort)-aime_bend(1,cohort)))/0.15+aime_bend(2,cohort)
-endif
-	
-end subroutine	aime_calc 
-
-subroutine benefit_calc(cohort,age,aime,benefit)
-!A reverse of aime_calc: given current aime, age, cohort
-!a procedure calculates correct benefit level.
-use parameters
-integer, intent(in) :: cohort, age
-real (kind = 8), intent(in) :: aime 
-real (kind = 8), intent(out) :: benefit
-
-!local variables
-real (kind = 8) pia
-
-!First, we have to calculate PIA from AIME
-
-if (aime <= aime_bend(1,cohort)) then !less than first bendpoint
-	pia = 0.9*aime !90% of his/her average indexed monthly earnings below the first $aime_bend(1)
-elseif (aime>aime_bend(1,cohort) .AND. aime <=aime_bend(2,cohort)) then !between first and second bendpoint
-	pia = 0.9*aime_bend(1,cohort) + 0.32*(aime-aime_bend(1,cohort)) !90% of the first $aime_bend(1) plus 32 percent of his/her average indexed monthly earnings over $aime_bend(1) and through $aime_bend(2)
-else !aime is over the second bendpoint
-	pia = 0.9*aime_bend(1,cohort) + 0.32*(aime_bend(2,cohort)-aime_bend(1,cohort)) + 0.15*(aime-aime_bend(2,cohort)) !on top of previous, 15% of aime over second bendpoint
-endif
-
-!Second, from PIA we recover benefit level given application age bonuses or penalties
-if (age<62) then
-	benefit = 0 !an individual can't get benefits this early
-elseif (age>=nra(cohort)) then !full benefit plus bonus (bonus is only up to age 70)
-	benefit = pia*(1+credit_delret(cohort)*(min(age,70)-nra(cohort)))
-elseif (cohort == 2 .AND. nra(cohort)-age>3) then !62 to 63 for second cohort
-	benefit = pia*(0.8-penalty_long*(nra(cohort)-age-3))
-else !62 to 65 for first cohort, 64 to 67 for second cohort
-	benefit = pia*(1-penalty_er3*(nra(cohort)-age))
-endif
-
-end subroutine benefit_calc
 
 
 

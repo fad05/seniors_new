@@ -9,7 +9,7 @@ subroutine labchoice (lchoice, cons, util, acur,anext, h, wage, mexp,ss)
     real (kind = 8), intent(out) :: util !value of utility under optimal choice
 
     !SCALED VARIABLES
-    real (kind = 8) acur_scaled, anext_scaled, mexp_scaled, ss_scaled
+    real (kind = 8) acur_scaled, anext_scaled, mexp_scaled, ss_scaled, lchoice_scaled
     real (kind = 8) :: ltot_scaled
 	real (kind = 8) :: kappa_scaled
 	real (kind = 8) :: cmin_scaled
@@ -147,8 +147,9 @@ subroutine labchoice (lchoice, cons, util, acur,anext, h, wage, mexp,ss)
 			endif
 		enddo
 		
-		lchoice = c	!solution	
-		call cons_util_calc(lchoice, wage, acur_scaled, anext_scaled, mexp_scaled, ss_scaled,cons, util)
+		lchoice_scaled = c		
+		call cons_util_calc(lchoice_scaled, wage, acur_scaled, anext_scaled, mexp_scaled, ss_scaled,cons, util)
+		lchoice = lchoice_scaled*scale_factor !solution, expressed in hours
 		
 !		!scale back
 !		lchoice = lchoice*scale_factor
