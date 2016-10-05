@@ -8,11 +8,11 @@ implicit none
 
 
 interface
-subroutine valfun(cohort,wage,medexp,transmat,surv,ms,vf,pf,lchoice)
+subroutine valfun(cohort,wage,medexp,transmat,surv,ms,vf,vf_na,pf,pf_na,lchoice,lchoice_na,app_policy)
     use parameters
     use procedures
     implicit none
-    integer, intent(in) :: cohort
+	integer, intent(in) :: cohort
     real (kind = 8), dimension(lifespan,nwagebins), intent(in) :: wage
     real (kind = 8), dimension(lifespan,nhealth), intent(in) :: surv
     real (kind = 8), dimension(lifespan,nhealth,nmedbins), intent(in) :: medexp
@@ -21,6 +21,10 @@ subroutine valfun(cohort,wage,medexp,transmat,surv,ms,vf,pf,lchoice)
     real (kind = 8), dimension(grid_asset,statesize,grid_ss,lifespan+1), intent(out) :: vf
     integer, dimension(grid_asset,statesize,grid_ss,lifespan), intent(out) :: pf
     real (kind = 8), dimension(grid_asset,statesize,grid_ss,lifespan), intent(out) :: lchoice
+	real (kind = 8), dimension(grid_asset,statesize,grid_ss,lifespan+1,2), intent(out) :: vf_na
+	integer, dimension(grid_asset,statesize,grid_ss,lifespan,2), intent(out) :: pf_na
+	real (kind = 8), dimension(grid_asset,statesize,grid_ss,lifespan,2), intent(out) :: app_policy
+	real (kind = 8), dimension(grid_asset,statesize,grid_ss,lifespan,2), intent(out) :: lchoice_na
 end subroutine valfun
 subroutine labchoice (lchoice, cons, util, acur,anext, h, wage, mexp)
     use parameters
@@ -59,9 +63,17 @@ real (kind = 8), dimension(8,3) :: typemat
 real (kind = 8) healthtrans(lifespan-1,2,ntypes), surv(lifespan,2,ntypes)
 real (kind = 8) htrans_full(2,2,lifespan-1,ntypes)
 real (kind = 8) transmat(statesize,statesize,lifespan-1,ntypes)
+!for social security applicants
 real (kind = 8) vf(grid_asset,statesize,grid_ss,lifespan+1) !lifespan + additional period of bequests (leave bequest at age 91)
 integer pf(grid_asset,statesize,grid_ss,lifespan) !lifespan (no policy for age 91)
 real (kind = 8) lchoice(grid_asset,statesize,grid_ss,lifespan) !optimal labor choice given current asset, current state and current age
+!for non-applicants
+real (kind = 8), dimension(grid_asset,statesize,grid_ss,lifespan+1,2) :: vf_na
+integer, dimension(grid_asset,statesize,grid_ss,lifespan,2) :: pf_na
+real (kind = 8), dimension(grid_asset,statesize,grid_ss,lifespan,2) :: app_policy
+real (kind = 8), dimension(grid_asset,statesize,grid_ss,lifespan,2) :: lchoice_na
+	
+	
 integer i,j,k,l,t,w,wn,m,mn,h,hn,ind_type
 integer :: cohort, sex, college, health, age(lifespan) = (/(i,i=50,90)/)
 integer ms(statesize,3)
@@ -219,7 +231,8 @@ ind_type = 1
 !labor choice
 lchoice = -10
 !value function
-call valfun(1,wages(:,:,ind_type),medexp(:,:,:,ind_type),transmat(:,:,:,ind_type),surv(:,:,ind_type),ms,vf,pf,lchoice)
+call valfun(1,wages(:,:,ind_type),medexp(:,:,:,ind_type),transmat(:,:,:,ind_type),surv(:,:,ind_type),ms, &
+vf,vf_na,pf,pf_na,lchoice,lchoice_na,app_policy)
 
 call lc_simulation(2.0d5,1.0d3,1.5d1,transmat(:,:,:,ind_type),vf,pf,lchoice)
 !		END TESTING
@@ -228,7 +241,7 @@ end
 !End of main program
 !========================================================================
 !Local subroutines
-subroutine valfun(cohort,wage,medexp,transmat,surv,ms,vf,pf,lchoice)
+subroutine valfun(cohort,wage,medexp,transmat,surv,ms,vf,vf_na,pf,pf_na,lchoice,lchoice_na,app_policy)
     use parameters
     use procedures
     implicit none
@@ -239,9 +252,16 @@ subroutine valfun(cohort,wage,medexp,transmat,surv,ms,vf,pf,lchoice)
     real (kind = 8), dimension(lifespan,nhealth,nmedbins), intent(in) :: medexp
     real (kind = 8), dimension(statesize,statesize,lifespan-1), intent(in) :: transmat
     integer, dimension(statesize,3), intent(in) :: ms
+    !vf, pf and labchoice for benefit applicants ("first vf")
     real (kind = 8), dimension(grid_asset,statesize,grid_ss,lifespan+1), intent(out) :: vf
     integer, dimension(grid_asset,statesize,grid_ss,lifespan), intent(out) :: pf
     real (kind = 8), dimension(grid_asset,statesize,grid_ss,lifespan), intent(out) :: lchoice
+    !vf, pf, labchoice and application policy for non-applicants ("second vf")
+    !note the last dimension of the size 2, which signifies the way we update next period benefits (more or less than 35 working years)
+	real (kind = 8), dimension(grid_asset,statesize,grid_ss,lifespan+1,2), intent(out) :: vf_na !value function for those not applied to social security benefits
+	integer, dimension(grid_asset,statesize,grid_ss,lifespan,2), intent(out) :: pf_na !policy function for those not applied to social security benefits
+	real (kind = 8), dimension(grid_asset,statesize,grid_ss,lifespan,2), intent(out) :: app_policy !each entry is 0-1; application policy!
+	real (kind = 8), dimension(grid_asset,statesize,grid_ss,lifespan,2), intent(out) :: lchoice_na !labor choice if not applied
 !INTERNAL VARIABLES
     real (kind = 8) assets(grid_asset), beq(grid_asset), cons, util, opt_labor, val_nomax(grid_asset,grid_asset)
     real (kind = 8) val_nomax_na(grid_asset,grid_asset)
@@ -253,13 +273,6 @@ subroutine valfun(cohort,wage,medexp,transmat,surv,ms,vf,pf,lchoice)
     real (kind = 8) vf_na_interp(statesize) !container for interpolated value function
     real (kind = 8) val_max_na(grid_asset) !technical variable, maxed vf_na BEFORE comparison vith vf
     
-!	INTERNAL VAIABLES TO BE MADE EXTERNAL
-!	note the last dimension is "2", which signifies the way we update next period benefits
-	real (kind = 8), dimension(grid_asset,statesize,grid_ss,lifespan+1,2) :: vf_na !value function for those not applied to social security benefits
-	integer, dimension(grid_asset,statesize,grid_ss,lifespan,2) :: pf_na !policy function for those not applied to social security benefits
-	real (kind = 8), dimension(grid_asset,statesize,grid_ss,lifespan,2) :: app_policy !each entry is 0-1; application policy!
-	real (kind = 8), dimension(grid_asset,statesize,grid_ss,lifespan,2) :: lchoice_na !labor choice if not applied
-	
 
 !BODY OF VALFUN
 !1. Check input and output matrices' dimensions
