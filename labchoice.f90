@@ -214,46 +214,47 @@ subroutine labchoice (lchoice, cons, util, acur,anext, h, wage, mexp,ss)
     return !end of subroutine
     !function that allows to use minpack
     contains
-        subroutine lc_minpack( m, n, x, fvec1, iflag )
-            integer ( kind = 4 ) n, m
-            real (kind = 8) fvec1(m)
-            integer ( kind = 4 ) iflag
-            real (kind = 8)  x(n)
+!        subroutine lc_minpack( m, n, x, fvec1, iflag )
+!            integer ( kind = 4 ) n, m
+!            real (kind = 8) fvec1(m)
+!            integer ( kind = 4 ) iflag
+!            real (kind = 8)  x(n)
 
-            !internal variables
-            real (kind = 8) lab, cl, ul
+!            !internal variables
+!            real (kind = 8) lab, cl, ul
 
-            !body
-            lab = x(n)
-            if (lab<0) then
-				print *, 'Input labor is negative! Push any button to proceed.'
-				read (*,*)
-				lab = 1.0d-6
-			endif 
-			!if (lab < 0) then
-			!	lab = 0 !no negative hours are feasible
-			!endif
+!            !body
+!            lab = x(n)
+!            if (lab<0) then
+!				print *, 'Input labor is negative! Push any button to proceed.'
+!				read (*,*)
+!				lab = 1.0d-6
+!			endif 
+!			!if (lab < 0) then
+!			!	lab = 0 !no negative hours are feasible
+!			!endif
 			
-			if (lab > lmax) then !choice is infeasible
-				fvec(1) = 1.0d5 !large POSITIVE utility, since we're minimizing; we can't afford violation of this constraint; thus it's never optimal to choose this amount of hours
-			else !lab is between zero and lmax, thus we just calculate consumption and utility
-				call cons_util_calc(lab, wage, acur_scaled, anext_scaled, mexp_scaled, ss_scaled,cl, ul)
-				fvec(1) = -ul ! we're minimizing, so in order to find maximum, we need negative of utility function
-			endif
-			x(n) = lab
-			if (isnan(x(n)) .OR. isnan(fvec(1))) then
-				print *, x(n) 
-				print *, fvec(1)
-				print *, 'NAN. Press any button:'
-				read (*,*)
-			endif
-			!print *, x(n)
-			!print *, fvec(1)
-        end subroutine lc_minpack
+!			if (lab > lmax) then !choice is infeasible
+!				fvec(1) = 1.0d5 !large POSITIVE utility, since we're minimizing; we can't afford violation of this constraint; thus it's never optimal to choose this amount of hours
+!			else !lab is between zero and lmax, thus we just calculate consumption and utility
+!				call cons_util_calc(lab, wage, acur_scaled, anext_scaled, mexp_scaled, ss_scaled,cl, ul)
+!				fvec(1) = -ul ! we're minimizing, so in order to find maximum, we need negative of utility function
+!			endif
+!			x(n) = lab
+!			if (isnan(x(n)) .OR. isnan(fvec(1))) then
+!				print *, x(n) 
+!				print *, fvec(1)
+!				print *, 'NAN. Press any button:'
+!				read (*,*)
+!			endif
+!			!print *, x(n)
+!			!print *, fvec(1)
+!        end subroutine lc_minpack
         
         subroutine cons_util_calc(lbr, wg, acrnt, anxt, mxp, ssec, cns, utl)
 			real (kind = 8), intent(in) :: lbr, wg, acrnt, anxt, mxp, ssec
 			real (kind = 8), intent(out) :: cns, utl
+			real (kind = 8) taxes, income, taxable_income
 		
 		
 			!BODY
@@ -263,7 +264,11 @@ subroutine labchoice (lchoice, cons, util, acur,anext, h, wage, mexp,ss)
 			!2. anext > 0; if here consumption is lower than cmin, the case is not valid: agend sacrifices consumption for savings. If in this case consumption is lover than cmin, agent is not compensated;
 			!if consumption is negative, the utility is set to large negative number, in order never to be optimal.
 			!Another fork is whether labor is zero or not. If it is, there is no utility penalty, expressed as KAPPA.
-			cns = (1+r)*acrnt + lbr*wg +ssec- anxt - mxp !uncompensated consumption; in the case when lbr==0, labor income is ZERO
+			income = r*acrnt + lbr*wg !asset return + labor income
+			taxable_income = taxable_amount(income*scale_factor, ssec*scale_factor)
+			taxes = income_tax(taxable_income)/scale_factor
+			
+			cns = (1+r)*acrnt + lbr*wg +ssec- anxt - mxp - taxes !uncompensated consumption; in the case when lbr==0, labor income is ZERO
 			if (lbr == 0) then !labor is zero
 				if (anxt == 0) then !next-period assets are zero: agent is eligible for minimal consulption level					
 					if (cns > cmin_scaled) then !consumption is hgher than minimal, no transfers
@@ -298,33 +303,4 @@ subroutine labchoice (lchoice, cons, util, acur,anext, h, wage, mexp,ss)
 						
 		end subroutine cons_util_calc
 		
-!		subroutine findmin(l0,epsl,epsu,lopt,uopt)
-!		!Newton's method to find minimum of the utility function
-!		real (kind = 8), intent(in) :: l0 !initial guess
-!		real (kind = 8), intent(in) ::epsl, epsu !tolerance for l and util
-!		real (kind = 8), intent(out) :: lopt, uopt !solution and utility at solution
-		
-!		!local vars
-!		real (kind = 8) f1, f2, l
-		
-		
-!		!===========================================================================
-		
-!		!Check inputs
-!		if (l0<0) then
-!			print *, 'Choose another guess, labor can''t be negative'
-!			read (*,*)
-!			return
-!		elseif (l0>lmax) then
-!			print *, 'Choose another guess, labor can''t be this large'
-!			read (*,*)
-!			return
-!		endif
-		
-!		l = l0
-!		!calculate first derivative analytically
-!		!f1 = (1+delta*(h-1))*(ugamma*wage*(lmax-l)^(1-ugamma)*((1+r)*acur+l*wage-anext-mexp))
-		
-		
-!		end subroutine findmin
 end subroutine labchoice

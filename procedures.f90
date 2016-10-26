@@ -1,6 +1,6 @@
 module procedures
 implicit none
-public :: linspace, locate_greater, linproj, import_data, import_matrices, import_vector
+!public :: linspace, logspace,locate_greater, linproj, import_data, import_matrices, import_vector
 contains
 
 subroutine  linspace(a,b,n,outvec)
@@ -19,6 +19,40 @@ subroutine  linspace(a,b,n,outvec)
 	
 	return
 end subroutine linspace
+
+subroutine logspace(a,b,n,outvec)
+	real (kind = 8), intent(in) :: a, b !starting point, endpoint
+	integer, intent(in) :: n !number of points
+	real (kind = 8), dimension(n), intent(out) :: outvec !output vector
+	real (kind = 8) step
+	integer i
+	real (kind = 8) atemp, btemp, stpt, endpt
+
+	btemp = b
+	atemp = a
+	
+	if (b<a) then !inputs are incorrect
+		print *, 'b should be larger than a! Input correct b:'
+		read (*,*) btemp
+		print *, 'a = ', atemp
+		print *, 'b = ', btemp
+	endif
+		
+	if (a<=0.0) then
+		atemp = 1
+		btemp = btemp+(atemp-a) !atemp-a is just shift
+	endif
+	
+	stpt	=	log(atemp)
+	endpt	=	log(btemp)
+	call linspace(stpt,endpt,n,outvec)
+	
+	outvec = exp(outvec)
+	
+	if (a<=0) then
+		outvec = outvec - (atemp-a) !shift backwards
+	endif
+end subroutine logspace
 
 function locate_greater(inarray,num)
 	integer locate_greater
@@ -49,6 +83,17 @@ function linproj(x,a,b,fa,fb)
 	
 	linproj =  fa+(fb-fa)*(x-a)/(b-a)
 end function linproj
+	
+function lpsimp(x,b,f0,fb)
+	! simplified version of linproj, when a = 0
+	! some function f(x) on a point x, 0<x<b, given f(0) and f(b)
+	real (kind = 8), intent(in) :: x, b, f0, fb
+	real (kind = 8) lpsimp, fx
+	
+	fx = linproj(x,0.0d0,b,f0,fb)
+	lpsimp = fx
+	
+end function lpsimp
 
 subroutine import_vector(datafile,outdata)
     !The subroutine to read one-dimensional vector of data from 'datafile' to a vector "outdata"
@@ -152,7 +197,7 @@ endif
 
 !Once we've calculated PIA, we can calculate AIME
 	
-if (pia <= aime_bend(1,cohort)*0.9) then !lower than firs bendpoint
+if (pia <= aime_bend(1,cohort)*0.9) then !lower than first bendpoint
 	aime = pia/0.9
 elseif (pia > aime_bend(1,cohort)*0.9 .AND. pia <= aime_bend(1,cohort)*0.9 + 0.32*(aime_bend(2,cohort)-aime_bend(1,cohort))) then !between first and second bendpoint
 	aime = (pia - aime_bend(1,cohort)*0.9)/0.32 + aime_bend(1,cohort)
@@ -185,7 +230,7 @@ endif
 
 !Second, from PIA we recover benefit level given application age bonuses or penalties, and applying benefit cap
 if (age<62) then
-	benefit = 0 !an individual can't get benefits this early
+	benefit = pia !an individual can't get benefits this early
 elseif (age>=nra(cohort)) then !full benefit plus bonus (bonus is only up to age 70)
 	benefit = pia*(1+credit_delret(cohort)*(min(age,70)-nra(cohort)))
 	!remember that we have benefit cap (which is also adjusted by age of applicaton in the similar way)
@@ -211,7 +256,101 @@ real (kind = 8), dimension(grid_asset), intent(in) :: assets
 real (kind = 8), dimension(grid_asset), intent(out) :: beq
 
 beq = eta*((assets+d)/scale_factor)**(1-sigma)/(1-sigma) !notice scale factor here
-
 end subroutine bequest_value
+
+function distance2d(x1,y1,x2,y2)
+!a function that calculates Euclidean metric of a distance between two ponts (x1,y1) and (x2,y2) on XY-plane
+real (kind = 8), intent(in) :: x1,y1,x2,y2
+real (kind = 8) distance2d
+distance2d = dsqrt((x2-x1)**2+(y2-y1)**2)
+end function distance2d
+
+function income_tax(income)
+use parameters
+!function takes taxable income as input and
+!spits out taxes to pay
+real (kind = 8), intent(in) :: income 
+real tax_rate
+real income_tax
+
+tax_rate = btax*(1.0-(1.0+stax*income**ptax)**(-1.0/ptax))
+income_tax = income*tax_rate
+
+end function income_tax
+
+function taxable_amount(income,benefit)
+!function takes whole income, benefit lvl and marital state as inputs and
+!spits out taxable amount (which can be used as input to calculate income tax)
+use parameters
+real (kind = 8), intent(in) :: income, benefit
+integer :: ms = 1
+real taxable_amount, taxable_benefit
+
+!local vars
+real (kind = 8) provisional_income, first_tier, second_tier
+
+provisional_income = income + 0.5*benefit
+
+
+do while ((ms /= 1) .AND. (ms /= 2))
+	print *, 'Wrong marital status'
+	print *, 'Input correct marital status: 1 or 2'
+	read (*,*) ms
+enddo
+
+
+first_tier = max(0.0d0,0.5*min(benefit,min(provisional_income-first_treshold(ms),second_treshold(ms)-first_treshold(ms))))
+taxable_benefit = max(0.0d0,min(0.85*benefit,first_tier+0.85*(provisional_income-second_treshold(ms))))
+
+taxable_amount = income+taxable_benefit !total taxable amount: income +benefits
+
+end function taxable_amount
+
+function quadlin(x,y,z,q,x0,y0,z0,q0,x1,y1,z1,q1, & 
+v0000,v0001,v0010,v0011,v0100,v0101,v0110,v0111, &
+v1000,v1001,v1010,v1011,v1100,v1101,v1110,v1111)
+
+real (kind = 8), intent(in) :: 	x,y,z,q,x0,y0,z0,q0,x1,y1,z1,q1, &
+								v0000,v0001,v0010,v0011,v0100,v0101,v0110,v0111, &
+								v1000,v1001,v1010,v1011,v1100,v1101,v1110,v1111
+								
+real (kind = 8) quadlin, v
+real (kind = 8) n0000,n0001,n0010,n0011,n0100,n0101,n0110,n0111,n1000,n1001,n1010,n1011,n1100,n1101,n1110,n1111
+real (kind = 8) denom
+							
+!4D-linear interpolation
+!(x,y,z,q) - coordinates of a point in 4d space
+!(x0,y0,z0,q0) and (x1,y1,z1,q1) - polytope vertex nearest the origin and farthest from the origin ponts respectively
+!v0000 - v1111: values of a function on a points (example: v1010 = v(x1,y0,z1,q0))
+
+denom = (x1-x0)*(y1-y0)*(z1-z0)*(q1-q0)
+
+
+n0000 = (x1-x)*(y1-y)*(z1-z)*(q1-q)/denom
+n0001 = (x1-x)*(y1-y)*(z1-z)*(q-q0)/denom
+n0010 = (x1-x)*(y1-y)*(z-z0)*(q1-q)/denom
+n0011 = (x1-x)*(y1-y)*(z-z0)*(q-q0)/denom
+n0100 = (x1-x)*(y-y0)*(z1-z)*(q1-q)/denom
+n0101 = (x1-x)*(y-y0)*(z1-z)*(q-q0)/denom
+n0110 = (x1-x)*(y-y0)*(z-z0)*(q1-q)/denom
+n0111 = (x1-x)*(y-y0)*(z-z0)*(q-q0)/denom
+n1000 = (x-x0)*(y1-y)*(z1-z)*(q1-q)/denom
+n1001 = (x-x0)*(y1-y)*(z1-z)*(q-q0)/denom
+n1010 = (x-x0)*(y1-y)*(z-z0)*(q1-q)/denom
+n1011 = (x-x0)*(y1-y)*(z-z0)*(q-q0)/denom
+n1100 = (x-x0)*(y-y0)*(z1-z)*(q1-q)/denom
+n1101 = (x-x0)*(y-y0)*(z1-z)*(q-q0)/denom
+n1110 = (x-x0)*(y-y0)*(z-z0)*(q1-q)/denom
+n1111 = (x-x0)*(y-y0)*(z-z0)*(q-q0)/denom
+
+v = v0000*n0000+v0001*n0001+v0010*n0010+v0011*n0011+	&
+	v0100*n0100+v0101*n0101+v0110*n0110+v0111*n0111+	&
+	v1000*n1000+v1001*n1001+v1010*n1010+v1011*n1011+	&
+	v1100*n1100+v1101*n1101+v1110*n1110+v1111*n1111
+	
+quadlin = v
+
+end function quadlin
+
 
 end module procedures
