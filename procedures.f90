@@ -309,7 +309,7 @@ end function taxable_amount
 function quadlin(x,y,z,q,x0,y0,z0,q0,x1,y1,z1,q1, & 
 v0000,v0001,v0010,v0011,v0100,v0101,v0110,v0111, &
 v1000,v1001,v1010,v1011,v1100,v1101,v1110,v1111)
-
+!4-dimensional linear interpolation
 real (kind = 8), intent(in) :: 	x,y,z,q,x0,y0,z0,q0,x1,y1,z1,q1, &
 								v0000,v0001,v0010,v0011,v0100,v0101,v0110,v0111, &
 								v1000,v1001,v1010,v1011,v1100,v1101,v1110,v1111
@@ -352,5 +352,98 @@ quadlin = v
 
 end function quadlin
 
+!function trilin(x,y,z,x0,y0,z0,x1,y1,z1, & 
+!v000,v001,v010,v011,v100,v101,v110,v111)
+!!3-dimensional linear interpolation
+
+!real (kind = 8), intent(in) :: 	x,y,z,q,x0,y0,z0,q0,x1,y1,z1,q1, &
+!								v000,v001,v010,v011,v100,v101,v110,v111)
+								
+!real (kind = 8) trilin, v
+!real (kind = 8) n000,n001,n010,n011,n100,n101,n110,n111
+!real (kind = 8) denom
+							
+!!3D-linear interpolation
+!!(x,y,z) - coordinates of a point in 3d space
+!!(x0,y0,z0) and (x1,y1,z1) - polytope vertex nearest the origin and farthest from the origin ponts respectively
+!!v000 - v111: values of a function on a points (example: v101 = v(x1,y0,z1))
+
+!denom = (x1-x0)*(y1-y0)*(z1-z0)
+
+
+!n000 = (x1-x)*(y1-y)*(z1-z)/denom
+!n001 = (x1-x)*(y1-y)*(z-z0)/denom
+!n010 = (x1-x)*(y-y0)*(z1-z)/denom
+!n011 = (x1-x)*(y-y0)*(z-z0)/denom
+!n100 = (x-x0)*(y1-y)*(z1-z)/denom
+!n101 = (x-x0)*(y1-y)*(z-z0)/denom
+!n110 = (x-x0)*(y-y0)*(z1-z)/denom
+!n111 = (x-x0)*(y-y0)*(z-z0)/denom
+
+
+!v = v000*n000+v001*n001+v010*n010+v011*n011+	&
+!	v100*n100+v101*n101+v110*n110+v011*n011
+
+	
+!trilin = v
+
+!end function trilin
+
+subroutine stationary_dist(transmat, statvec)
+!A proceduree takes stocahstic matrix as input and calculates stationary probabilistic vector
+!corresponding to this matrix.
+real (kind = 8), dimension(:,:), intent(in) :: transmat
+real (kind = 8), dimension(:), intent(out) :: statvec
+
+integer n,m,k !dimensions of the input
+real (kind = 8) :: eps=1.0d-6, deltasum = 1.0d0
+real (kind = 8), dimension(:), allocatable :: statvec_upd
+
+	n = size(transmat,1)
+	m = size(transmat,2)
+	k = size(statvec)
+
+	if (n /= m) then
+		print *, "Input matrix is not square!"
+		read (*,*)
+		return
+	elseif (n /= k) then
+		print *, "Dimensions of input matrix and output vector should correspond!"
+		read (*,*)
+		return
+	endif
+
+	allocate(statvec_upd(k))
+
+	statvec = 1.0d0/k !initialize
+
+	do while (deltasum>eps)
+		statvec_upd = matmul(statvec,transmat)
+		deltasum = sum(abs(statvec-statvec_upd))
+		statvec = statvec_upd
+	enddo
+
+	deallocate(statvec_upd)
+
+end subroutine stationary_dist
+
+subroutine cumsum(invec,outvec)
+!A function that calculate cumulative sums of consecutive elements of a given vector invec
+!and stores them into outvec
+
+real (kind = 8), intent(in), dimension(:) :: invec
+real (kind = 8), intent(out), dimension(:) :: outvec
+
+integer n, i
+
+n = size(invec)
+
+outvec(1) = invec(1)
+
+do i = 2,n
+	outvec(i) = outvec(i-1)+invec(i)
+enddo
+
+end subroutine cumsum
 
 end module procedures

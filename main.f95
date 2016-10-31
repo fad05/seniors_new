@@ -36,14 +36,16 @@ subroutine labchoice (lchoice, cons, util, acur,anext, h, wage, mexp)
     real (kind = 8), intent(out) :: cons !consumption under optimal choice
     real (kind = 8), intent(out) :: util !value of utility under optimal choice
 end subroutine labchoice
-subroutine lc_simulation(cohort,in_asset,in_aime,years_aime,wage,mexp,ms,transmat,vf,vf_na,pf,pf_na,lchoice,lchoice_na,app_policy, &
-						life_assets,life_labor,app_age)
+subroutine lc_simulation(cohort,in_asset,in_aime,years_aime,wage,logwage,wzmean,wzsd,mexp,logmexp,mzmean,mzsd, &
+						ms,transmat,vf,vf_na,pf,pf_na,lchoice,lchoice_na,app_policy,life_assets,life_labor,app_age)
 	use parameters
 	use procedures
 	integer, intent(in) :: cohort
 	real (kind = 8), intent(in) :: in_asset, in_aime, years_aime
 	real (kind = 8), dimension(lifespan,nwagebins), intent(in) :: wage
+	real (kind = 8), dimension(lifespan), intent(in) :: wzmean, wzsd,logwage
 	real (kind = 8), dimension(lifespan,nhealth,nmedbins), intent(in) :: mexp
+	real (kind = 8), dimension(lifespan,nhealth), intent(in) :: mzmean, mzsd,logmexp
 	integer, dimension(statesize,3), intent(in) :: ms
 	real (kind = 8), dimension(statesize,statesize,lifespan-1), intent(in) :: transmat
 	real (kind = 8), intent(in) :: vf(grid_asset,statesize,grid_ss,lifespan+1) 
@@ -61,19 +63,36 @@ end interface
 !PROGRAM VARIABLES
 character*200 datafile !address of the data file on the disk
 character*30, names(5)
-!wageprof is a matrix that holds coefficients of the wage profile for each type;
-!dimensons are:
-!1: 8 types (2 cohorts,2 sexes,2 college),
-!2: cohort sex college, profile const, profile coefficient
-!3: health (bad(1) or good(2)) (for med coefs)
-!Common factors for wage and med profiles are cohort and college.
-!Wage is further conditioned by sex, and med is further conditioned by health
-real (kind = 8) wagecoefs(8,5), wages(lifespan,nwagebins,ntypes), wage_z(nwagebins,1),wagetrans(nwagebins,nwagebins,lifespan-1), &
-				mlwages(lifespan,ntypes) !mean log wages for each type
+real (kind = 8) statvec(statesize), cumstvec(statesize) !stationary distribution of states, and cumulative stationary distribution
+!-------------------------------
+!new variables related to wage
+!for each age, each type the entry of logwagedata will contain three values: (1. predicted mean log wage, 2. mean and 3. sd of parenting normal distribution of residuals at this age)
+!Thus, to compute a wage at particular age, I only need to know:
+!	1.  predicted mean log wage
+!	2.	bin we're at;
+!	4.	rule of how bins are organised : -inf<mu-1.5sd<mu-0.5sd<m+0.5sd<mu+1.5sd<+inf; 
+!	3.	mean and as of parenting normal. Then, given the rule the bins are organised as above, I make a necessary draw from truncated normal!
+real (kind = 8) logwagedata(lifespan,3,ntypes), logwage(lifespan,ntypes), wzmean(lifespan,ntypes), wzsd(lifespan,ntypes) 
+real (kind = 8) wagegrid(lifespan,nwagebins,ntypes) !wage grid points
+real (kind = 8) wagetrans(nwagebins,nwagebins,lifespan-1) !transition matrix between wage bins
+!-------------------------------
+!new variables related to medical expenditure
+!for each age, each type, and health the entry of logmexpdata will contain three values: (1. predicted mean log wage, 2. mean and 3. sd of parenting normal distribution of residuals at this age)
+!Thus, to compute a wage at particular age, I only need to know:
+!	1.  predicted mean log wage
+!	2.	bin we're at;
+!	4.	rule of how bins are organised : -inf<mu-1.5sd<mu-0.5sd<m+0.5sd<mu+1.5sd<+inf; 
+!	3.	mean and as of parenting normal. Then, given the rule the bins are organised as above, I make a necessary draw from truncated normal!
+real (kind = 8) logmexpdata(lifespan,3,nhealth,ntypes), logmexp(lifespan,nhealth,ntypes), &
+				mzmean(lifespan,nhealth,ntypes), mzsd(lifespan,nhealth,ntypes) 
+real (kind = 8) mexpgrid(lifespan,nhealth,nmedbins,ntypes)
+real (kind = 8) medtrans(nmedbins,nmedbins,lifespan-1)
+!-------------------------------
+real (kind = 8) bin_mean !intermediate variable
+!-------------------------------
 
-real (kind = 8) medcoefs(8,5,2), medexp(lifespan,2,nmedbins,ntypes), mexp_z(nmedbins,1), medtrans(nmedbins,nmedbins,lifespan-1)
 real (kind = 8), dimension(8,3) :: typemat
-real (kind = 8) healthtrans(lifespan-1,2,ntypes), surv(lifespan,2,ntypes)
+real (kind = 8) healthtrans(lifespan-1,nhealth,ntypes), surv(lifespan,nhealth,ntypes)
 real (kind = 8) htrans_full(2,2,lifespan-1,ntypes)
 real (kind = 8) transmat(statesize,statesize,lifespan-1,ntypes)
 !for social security applicants
@@ -98,71 +117,20 @@ integer ms(statesize,3)
 
 !PROGRAM BODY
 
-!user inputs the type
-
-print *, "Enter an integer 1:8, which defines an individual type"
-print *, "cohort college sex"
-print *, "1: 0	0	0"
-print *, "2: 0 	0	1"
-print *, "3. 0	1	0"
-print *, "4. 0	1	1"
-print *, "5. 1	0	0"
-print *, "6. 1	0	1"
-print *, "7. 1	1	0"
-print *, "8. 1	1	1"
-
-read (*,*) ind_type
-
 !-----------------------------------------------------------------------
 !1. Import files
-!1.1. Import coefficients of wage profiles
-datafile = 'data_inputs/wage_profiles_coefs.csv'
-open(unit = 1, file = datafile, action = "read")
-read (1,*) names(:)
-!print *, names
-do i = 1,ntypes
-    read (1,*) wagecoefs(i,:)
-    print *, wagecoefs(i,:)
-enddo
-close(1)
 
-!1.2. Import coefficients of medical expenditure profiles
-datafile = 'data_inputs/medical_expenses_profiles_coefs.csv'
-open(unit = 1, file = datafile, action = "read")
-read (1,*) names(:)
-!print *, names
-do i = 1,ntypes/2
-    read (1,*) medcoefs(2*i-1,:,1) !bad health, sex 0
-    medcoefs(2*i,:,1) = medcoefs(2*i-1,:,1) !coefficients at bad health, sex 1 are equal to bad health, sex 0
-    medcoefs(2*i,3,1) = 1 !setting sex to 1
-    read (1,*) medcoefs(2*i-1,:,2) !good health, sex 0
-    medcoefs(2*i,:,2) = medcoefs(2*i-1,:,2) !good health, sex 1 is equal to good health, sex 0
-    medcoefs(2*i,3,2) = 1 !setting sex to 1
-    print *, medcoefs(2*i-1,:,1)
-    print *, medcoefs(2*i,:,1)
-    print *, medcoefs(2*i-1,:,2)
-    print *, medcoefs(2*i,:,2)
-enddo
-close(1)
-
-!1.3 Import bins for wage and mexp
-
-datafile = 'data_inputs/wage_means_by_bins.csv'
-call import_data(datafile,wage_z)
-datafile = 'data_inputs/mexp_means_by_bins.csv'
-call import_data(datafile,mexp_z)
-
-!1.4 Import transition matrices
-!1.4.1 Wage transitions
+!1.1 Import transition matrices
+!1.1.1 Wage transitions
 datafile = 'data_inputs/transmat_wage.csv'
 call import_matrices(datafile,wagetrans)
-!1.4.2 Med expenses transitions
+!1.1.2 Med expenses transitions
 datafile = 'data_inputs/transmat_mexp.csv'
 call import_matrices(datafile,medtrans)
-!1.4.3 Health transitions, survival and type matrix
+!1.1.3 Health transitions, survival and type matrix
 do cohort = 0,1
-    do sex = 0,1
-        do college = 0,1
+	do college = 0,1
+		do sex = 0,1        
             do health = 0,1
                 !type matrix
                 !!!! VERY IMPORTANT!!!
@@ -187,40 +155,65 @@ do cohort = 0,1
     enddo
 enddo
 
-!-----------------------------------------------------------------------
-!2.!construct wages and medical expenses life cycle profiles for each type
+!2.	Construct wage and medical expenses grids
+!Import a wage profile, profile of sd and mean of parenting normal distribution (which we are going to use to draw a wage)
+!		And med exp profile, profile of sd and mean of parenting normal distribution (which we are going to use to draw a med exp), additionally conditional on health
 do i = 1,ntypes
-	mlwages(:,i) = wagecoefs(i,4) + wagecoefs(i,5)*age !mean log wage profiles for each type; we're going to need them for simulation
-    do k = 1,nwagebins
-        !print *, wagecoefs(i,4)
-        !print *, wagecoefs(i,5)
-        !print *, wage_z(k,1)
-        !print *, wagecoefs(i,4) + wagecoefs(i,5)*50 + wage_z(k,1)
-        !print *, exp(wagecoefs(i,4) + wagecoefs(i,5)*50 + wage_z(k,1))
-        wages(:,k,i) = exp(wagecoefs(i,4) + wagecoefs(i,5)*age + wage_z(k,1))
-
-		!QUESTIONABLE: TRUNCATED WAGES --------------------------------------
-        !wages(26:lifespan,k,i) = 0 ! once agent reaches 76, no wage available
-		!QUESTIONABLE: TRUNCATED WAGES --------------------------------------
-
-        !print *, wages(:,k,i)
-    enddo
-
-    do k = 1,nmedbins
-        do j = 1,2 !over health statuses
-            medexp(:,j,k,i) = exp(medcoefs(i,4,j) + medcoefs(i,5,j)*age + mexp_z(k,1))
-            !print *, medexp(:,j,k,i)
-        enddo
-    enddo
-    !print *, medexp(:,3,i)
+	!import from a proper file
+	WRITE(datafile,'(a,i1,a)') "data_inputs/lwage_smooth_",i,".csv"
+	call import_data(datafile,logwagedata(:,:,i))
+	logwage(:,i) = logwagedata(:,1,i)
+	wzmean(:,i) = logwagedata(:,2,i)
+	wzsd(:,i) = logwagedata(:,3,i)
+	!construct a wage grid: 
+	!for every type, for every age, construct a mean of corresponding wage bin from truncated normal distribition
+	!remember, residuals are distributed normally, but they are devidations from the log mean
+	!we do it in a few steps:
+	do k = 1,nwagebins !for every bin
+		do t = 1,lifespan !for every age
+			!1. calculate a mean of residual in that bin
+			if (k == 1) then !first bin
+				call truncated_normal_b_mean (wzmean(t,i), wzsd(t,i), wzmean(t,i)-1.5*wzsd(t,i),bin_mean) !calculate mean of the bin
+			elseif (k == nwagebins) then !last bin
+				call truncated_normal_a_mean (wzmean(t,i), wzsd(t,i), wzmean(t,i)+1.5*wzsd(t,i),bin_mean)
+			else !interior bins
+				call truncated_normal_ab_mean (wzmean(t,i), wzsd(t,i), wzmean(t,i)+wzsd(t,i)*(k-3.5), &
+												wzmean(t,i)+wzsd(t,i)*(k-2.5), bin_mean)
+			endif
+			wagegrid(t,k,i) = exp(logwage(t,i)+bin_mean)  !calculate real wage (exponent of mean log wage plus bin average)
+		enddo 
+	enddo
+	
+!Same for medical expenses, additionally condition on health	
+	do j = 1,nhealth
+		WRITE(datafile,'(a,i1,i1,a)') "data_inputs/lmexp_smooth_",i,j-1,".csv"
+		call import_data(datafile,logmexpdata(:,:,j,i))
+		logmexp(:,j,i) = logmexpdata(:,1,j,i)
+		mzmean(:,j,i) = logmexpdata(:,2,j,i)
+		mzsd(:,j,i) = logmexpdata(:,3,j,i)
+		do k = 1,nmedbins !for every bin
+			do t = 1,lifespan !for every age
+				!1. calculate a mean of residual in that bin
+				if (k == 1) then !first bin
+					call truncated_normal_b_mean (mzmean(t,j,i), mzsd(t,j,i), mzmean(t,j,i)-1.5*mzsd(t,j,i),bin_mean) !calculate mean of the bin
+				elseif (k == nmedbins) then !last bin
+					call truncated_normal_a_mean (mzmean(t,j,i), mzsd(t,j,i), mzmean(t,j,i)+1.5*mzsd(t,j,i),bin_mean)
+				else !interior bins
+					call truncated_normal_ab_mean (mzmean(t,j,i), mzsd(t,j,i), mzmean(t,j,i)+mzsd(t,j,i)*(k-3.5), &
+													mzmean(t,j,i)+mzsd(t,j,i)*(k-2.5), bin_mean)
+				endif
+				mexpgrid(t,j,k,i) = exp(logmexp(t,j,i)+bin_mean)  !calculate real med exp (exponent of mean log med exp plus bin average)
+			enddo
+		enddo
+	enddo
 enddo
 
 !-----------------------------------------------------------------------
 !3. Construct matrix of the correspondence of exostate to shocks
 do w = 1,nwagebins
     do m = 1,nmedbins
-        do h = 1,2
-            k = h+2*(m-1)+nmedbins*2*(w-1)
+        do h = 1,nhealth
+            k = h+nhealth*(m-1)+nmedbins*nhealth*(w-1)
             ms(k,:) = (/w,m,h/) !matrix that translates combination of wage shocks, med exp shocks and health shocks into a single number
             print *, ms(k,:)
         enddo
@@ -258,17 +251,35 @@ enddo
 !-----------------------------------------------------------------------
 !		TESTING GROUNDS
 
-!5. Pick a type between 1 and 8, and calculate optimal labor choice matrix and value function for a chosen type
-ind_type = 1
+!5. Pick a type between 1 and 8, and calculate optimal labor choice matrix and value function for a chosen type (choice have been made in the beginning)
+!user inputs the type
+
+print *, "Enter an integer 1:8, which defines an individual type"
+print *, "cohort college sex"
+print *, "1: 0	0	0"
+print *, "2: 0 	0	1"
+print *, "3. 0	1	0"
+print *, "4. 0	1	1"
+print *, "5. 1	0	0"
+print *, "6. 1	0	1"
+print *, "7. 1	1	0"
+print *, "8. 1	1	1"
+
+read (*,*) ind_type
+print *, "Chosen type:", ind_type
+cohort = (ind_type-1)/4 + 1 !cohort is 1/2 and not 0/1 because of indexing style; it is passed to valfun, where it is passed to aime_calc and benefit_calc
+!sex = mod(ind_type,2)
+!Calculate stationary distribution of states at age 50 for that type
+call stationary_dist(transmat(:,:,1,ind_type),statvec)
+call cumsum(statvec,cumstvec)
 !labor choice
 lchoice = -10
 !value function
-call valfun(1,wages(:,:,ind_type),medexp(:,:,:,ind_type),transmat(:,:,:,ind_type),surv(:,:,ind_type),ms, &
+call valfun(cohort,wagegrid(:,:,ind_type),mexpgrid(:,:,:,ind_type),transmat(:,:,:,ind_type),surv(:,:,ind_type),ms, &
 vf,vf_na,pf,pf_na,lchoice,lchoice_na,app_policy)
 
-cohort = 1
-
-call lc_simulation(cohort,1.5d4,0.8d3,2.5d1, wages(:,:,ind_type),medexp(:,:,:,ind_type),ms, &
+call lc_simulation(cohort,1.5d4,0.8d3,2.5d1, wagegrid(:,:,ind_type),logwage(:,ind_type),wzmean(:,ind_type),wzsd(:,ind_type), &
+mexpgrid(:,:,:,ind_type),logmexp(:,:,ind_type),mzmean(:,:,ind_type),mzsd(:,:,ind_type), ms, &
 transmat(:,:,:,ind_type),vf,vf_na,pf,pf_na,lchoice,lchoice_na,app_policy, life_assets,life_labor,app_age)
 
 !		END TESTING
@@ -312,6 +323,24 @@ subroutine valfun(cohort,wage,medexp,transmat,surv,ms,vf,vf_na,pf,pf_na,lchoice,
 
 !BODY OF VALFUN
 !1. Check input and output matrices' dimensions
+
+!	print *, size(wage,1)
+!	print *, size(wage,2)
+!	print *, size(medexp,1)
+!	print *, size(medexp,2)
+!	print *, size(medexp,3)
+!	print *, size(transmat,1)
+!	print *, size(transmat,2)
+!	print *, size(transmat,3)
+!	print *, size(vf,1)
+!	print *, size(vf,2)
+!	print *, size(vf,3)
+!	print *, size(vf,4)
+!	print *, size(pf,1)
+!	print *, size(pf,2)
+!	print *, size(pf,3)
+!	print *, size(pf,4)
+	
     if (size(wage,1) .NE. lifespan) then
         print *, 'Wage matrix "lifespan" size is incorrect!'
         vf = -1
@@ -326,7 +355,7 @@ subroutine valfun(cohort,wage,medexp,transmat,surv,ms,vf,vf_na,pf,pf_na,lchoice,
         print *, 'Med matrix "lifespan" size is incorrect!'
         vf = -3
         return
-    elseif (size(medexp,2) .NE. 2) then
+    elseif (size(medexp,2) .NE. nhealth) then
         print *, 'Med matrix "health state" size is incorrect!'
         vf = -4
         return
@@ -449,8 +478,8 @@ subroutine valfun(cohort,wage,medexp,transmat,surv,ms,vf,vf_na,pf,pf_na,lchoice,
     
     !initialize vf and pf; if we will observe these numbers after the execution, means something wrong
     
-    vf = -101
-    pf = -102
+    vf = -101.0d0
+    pf = -102.0d0
     
     do k = 1,grid_ss
 		do s = 1,statesize
@@ -622,8 +651,8 @@ subroutine valfun(cohort,wage,medexp,transmat,surv,ms,vf,vf_na,pf,pf_na,lchoice,
     return
 end subroutine valfun
 
-subroutine lc_simulation(cohort,in_asset,in_aime,years_aime,wage,mexp,ms,transmat,vf,vf_na,pf,pf_na,lchoice,lchoice_na,app_policy, &
-						life_assets,life_labor,app_age)
+subroutine lc_simulation(cohort,in_asset,in_aime,years_aime,wage,logwage,wzmean,wzsd,mexp,logmexp,mzmean,mzsd, &
+						ms,transmat,vf,vf_na,pf,pf_na,lchoice,lchoice_na,app_policy,life_assets,life_labor,app_age)
 !this subroutine simulates the life cycle of an individual given:
 !-cohort
 !-initial assets
@@ -635,10 +664,13 @@ subroutine lc_simulation(cohort,in_asset,in_aime,years_aime,wage,mexp,ms,transma
 !-policy functions
 use parameters
 use procedures
+implicit none
 integer, intent(in) :: cohort
 real (kind = 8), intent(in) :: in_asset, in_aime, years_aime
 real (kind = 8), dimension(lifespan,nwagebins), intent(in) :: wage
+real (kind = 8), dimension(lifespan), intent(in) :: wzmean, wzsd,logwage
 real (kind = 8), dimension(lifespan,nhealth,nmedbins), intent(in) :: mexp
+real (kind = 8), dimension(lifespan,nhealth), intent(in) :: mzmean, mzsd,logmexp
 integer, dimension(statesize,3), intent(in) :: ms
 real (kind = 8), dimension(statesize,statesize,lifespan-1), intent(in) :: transmat
 real (kind = 8), intent(in) :: vf(grid_asset,statesize,grid_ss,lifespan+1) 
@@ -654,24 +686,43 @@ integer, intent(out) :: app_age !the variable wil contain age of social security
 
 
 !LOCAL VARIABLES
-real (kind = 8) life_earnings(lifespan), life_medexp(lifespan)
-real (kind = 8) acur, anext, workyears, app, apn, apx, aime, lpp,lpn,lpx, bcur, vfp, vfn, vfx1,vfx2
+real (kind = 8) life_earnings(lifespan), life_wage(lifespan), life_medexp(lifespan)
+real (kind = 8) anext, workyears, aime, apx, lpx, acur, wcur, mcur, bcur, vx1,vx2
 real (kind = 8) wage_tn, med_tn !wage and medical expenses drawn from truncated normal
-integer iaprev, ianext, ibprev, ibnext, iwprev,iwnext,imprev,imnext !indices of previous and next gridpoints
-real (kind = 8) rndnum
+integer iaprev, ianext, ibprev, ibnext
+integer iwprev,iwnext,imprev,imnext !indices of previous and next gridpoints in (w,m) - space
+
+
+real (kind = 8) rndnum, statvec(statesize), cumstvec(statesize)
 real (kind = 8) assets(grid_asset), ss(grid_ss)
-integer t, curstate, bcalc, age, seed_size
+integer t, curstate, nextstate , bcalc, age, seed_size
 integer w,m,h !wage, med, health index
 integer, allocatable :: seed(:)
 integer :: tn_seed = 10000
 real (kind = 8) :: tn_sigma = 1.5d0, tn_mu = 0.0d0, tn_samp
+
+!Value function polygone vertices for linear interpolation for vf, assets, labor
+real (kind = 8) v0000,v0001,v0010,v0011,v0100,v0101,v0110,v0111, &
+				v1000,v1001,v1010,v1011,v1100,v1101,v1110,v1111
+real (kind = 8) a0000,a0001,a0010,a0011,a0100,a0101,a0110,a0111, &
+				a1000,a1001,a1010,a1011,a1100,a1101,a1110,a1111		
+real (kind = 8) l0000,l0001,l0010,l0011,l0100,l0101,l0110,l0111, &
+				l1000,l1001,l1010,l1011,l1100,l1101,l1110,l1111				
+!Value function polygone vertices for linear interpolation for vf_na, assets_na, labor_na		
+real (kind = 8) vn0000,vn0001,vn0010,vn0011,vn0100,vn0101,vn0110,vn0111, &
+				vn1000,vn1001,vn1010,vn1011,vn1100,vn1101,vn1110,vn1111
+real (kind = 8) an0000,an0001,an0010,an0011,an0100,an0101,an0110,an0111, &
+				an1000,an1001,an1010,an1011,an1100,an1101,an1110,an1111		
+real (kind = 8) ln0000,ln0001,ln0010,ln0011,ln0100,ln0101,ln0110,ln0111, &
+				ln1000,ln1001,ln1010,ln1011,ln1100,ln1101,ln1110,ln1111	
+!Corresponding state values in s-space
+integer state00, state01,state10,state11
 
 !determine initial state
 call random_seed(seed_size)
 allocate(seed(seed_size))
 seed = 100 !fix seed to have reproducible results
 call random_seed(put = seed) !start new random sequence
-call random_number(rndnum) !get a random number
 deallocate(seed)
 
 !initialize vectors
@@ -679,6 +730,7 @@ life_earnings 	= -1.0d0
 life_assets 	= -1.0d0
 life_labor		= -1.0d0
 life_medexp 	= -1.0d0
+life_wage		= -1.0d0
 
 !   create assets grid and social security grid
 assets(1)	= 0
@@ -689,11 +741,13 @@ call logspace(ss_min,ss_max,grid_ss-1,ss(2:grid_ss))
 
 !test truncated normal
 
-call truncated_normal_ab_sample(tn_mu,tn_sigma,-2.0d0,1.d0,tn_seed,tn_samp)
+!call truncated_normal_ab_sample(tn_mu,tn_sigma,-2.0d0,1.d0,tn_seed,tn_samp)
 !------------------------------------------
-!For now, initial state is just state 1; 
-!I will update it soon
-nextstate = 1
+!calculate initial stationry distribution of states at age 50 and determine initial state by random draw
+call stationary_dist(transmat(:,:,1),statvec)
+call cumsum(statvec,cumstvec)
+call random_number(rndnum) !get a random number from uniform (0,1) distribution
+nextstate = locate_greater(cumstvec,rndnum) !see where this number falls in cumulative current distribution
 !------------------------------------------
 
 acur = in_asset !input asset
@@ -705,26 +759,82 @@ app_age = 1000 !we first set it to very high number, just for initialization
 do t = 1,lifespan
 	age = t+49
 	curstate = nextstate !update state
+	
+	!	A) ASSETS HISTORY UPDATE
+	!put current asset into personal history
+	life_assets(t) = acur
+	
 	!determine wage shock and med shock corresponding to the current state; we're going to need it for AIME update
 	!that is, which bin we're at now for wage and for med exp
 	w = int(ms(curstate,1))
 	m = int(ms(curstate,2))
 	h = int(ms(curstate,3))
 	!given the bin, make two draws from truncated normal for both wage and med exp
+	!First, draw wage residual
 	if (w /= 1 .AND. w /= nwagebins) then
-		call truncated_normal_ab_sample(tn_mu,tn_sigma,-2.0d0,1.d0,tn_seed,tn_samp)
+		call truncated_normal_ab_sample(wzmean(t),wzsd(t),wzmean(t)+wzsd(t)*(w-3.5), &
+										wzmean(t)+wzsd(t)*(w-2.5),tn_seed,wage_tn)
 	elseif (w == 1) then
+		call truncated_normal_ab_sample(wzmean(t),wzsd(t),wage(t,1), &
+										wzmean(t)-1.5*wzsd(t),tn_seed,wage_tn)
+	elseif (w == nwagebins) then
+		call truncated_normal_ab_sample(wzmean(t),wzsd(t),wzmean(t)+1.5*wzsd(t), &
+										wage(t,nwagebins),tn_seed,wage_tn)
 	else
+		print *, "Something's wrong with current wage state"
+		read (*,*)
+		stop
 	endif
+	! Calculate wage
+	wcur = exp(logwage(t)+wage_tn)
 	
+	!	B) WAGE HISTORY UPDATE
+	life_wage(t) = wcur
+	
+	! Find nearest wage grid points
+	if (life_wage(t)>=wage(t,w)) then
+		iwprev = w
+		iwnext = w + 1
+	else
+		iwprev = w - 1
+		iwnext = w
+	endif
+	! Second draw med exp residuals
+	if (m /= 1 .AND. m /= nmedbins) then
+		call truncated_normal_ab_sample(mzmean(t,h),mzsd(t,h),mzmean(t,h)+mzsd(t,h)*(m-3.5), &
+										mzmean(t,h)+mzsd(t,h)*(m-2.5),tn_seed,med_tn)
+	elseif (m == 1) then
+		call truncated_normal_ab_sample(mzmean(t,h),mzsd(t,h),mexp(t,h,1), &
+										mzmean(t,h)-1.5*mzsd(t,h),tn_seed,med_tn)
+	elseif (m == nmedbins) then
+		call truncated_normal_ab_sample(mzmean(t,h),mzsd(t,h),mzmean(t,h)+1.5*mzsd(t,h), &
+										mexp(t,h,nmedbins),tn_seed,med_tn)
+	else
+		print *, "Something's wrong with current med exp state"
+		read (*,*)
+		stop
+	endif
+	! Calculate med exp
+	mcur = exp(logmexp(t,h)+med_tn)
+	
+	!	C) MEDICAL EXPENSES HISTORY UPDATE
+	life_medexp(t) = mcur
+	
+	! Nearest med grid points
+	if (life_medexp(t)>=mexp(t,h,m)) then
+		imprev = m
+		imnext = m + 1
+	else
+		imprev = m - 1
+		imnext = m
+	endif
 	!check the next period benefit calculation regime
 	if (workyears<35) then
 		bcalc = 1
 	else
 		bcalc = 2
 	endif
-	!put current asset into personal history
-	life_assets(t) = acur	
+		
 	!given current aime, calculate current "potential" benefit bcur (the amount one will receive IF 1) eligible 2)chooses to apply)
 	call benefit_calc(cohort,age,aime,bcur)
 	!given current benefit, calculate two closest locations on benefit grid
@@ -734,98 +844,225 @@ do t = 1,lifespan
 	iaprev = locate_greater(assets,acur)-1 !index of closest asset on the grid from below
 	ianext = iaprev+1 !index of closest asset on the grid from above	
 	
-	!check whether individual applies to social security this period.
-	!Three possible cases:
-	!1)	individual is eligible but not yet applied (age<app_age) and 
-	!	at the same time it is unsure whether to apply or not: app_policy(iaprev,curstate,ibprev,t,bcalc) /= app_policy(ianext,curstate,ibnext,t,bcalc).
-	!2) individual definitely applies this period: this means app_policy(iaprev,curstate,ibprev,t,bcalc) = 1 and app_policy(ianext,curstate,ibnext,t,bcalc) = 1.
-	!3) individual doesn't apply this period: app_policy(iaprev,curstate,ibprev,t,bcalc) = 0 and app_policy(ianext,curstate,ibnext,t,bcalc) = 0
-	!Let's check it case by case.
-	if (app_age>age) then !individual not yet applied	
-		if (app_policy(iaprev,curstate,ibprev,t,bcalc) /= app_policy(ianext,curstate,ibnext,t,bcalc)) then !1st case
-			!we have to check both vf and vf_na at exact point (acur,bcur)
-			!first, check vf_na, result stored in vfx1
-			vfp = vf_na(iaprev,curstate,ibprev,t,bcalc)
-			vfn = vf_na(ianext,curstate,ibnext,t,bcalc)
-			vfx1 = vfp + (vfn-vfp)*distance2d(acur,bcur,assets(iaprev),ss(ibprev))/ &
-				distance2d(assets(ianext),ss(ibnext),assets(iaprev),ss(iaprev))
-			!same for vf, store in vfx2
-			vfp = vf(ianext,curstate,ibnext,t)
-			vfn = vf(ianext,curstate,ibnext,t)
-			vfx2 = vfp + (vfn-vfp)*distance2d(acur,bcur,assets(iaprev),ss(ibprev))/ &
-				distance2d(assets(ianext),ss(ibnext),assets(iaprev),ss(iaprev))
-			!now check which one is higher; and take the application decision correspondingly
-			if (vfx2>=vfx1) then
-				app_age = age !age of application is current age
-			endif
-		elseif (app_policy(iaprev,curstate,ibprev,t,bcalc) == 1 .AND. app_policy(ianext,curstate,ibnext,t,bcalc) == 1) then !2d case
-		!2) second case, individual applies
-			app_age = age
-		endif !if not these cases, individual doesn't apply (3d case)
+	
+	!	Now we have two ends of 4-tuple: (iaprev,ibprev,iwprev,imprev); (ianext,ibnext,iwnext,imnext)
+	!	However, value function at a given period t is 3-dimensional: 
+	!	(imprev, iwprev) -> (imprev, iwprev,h) -> sprev 
+	!	(imnext, iwnext) -> (imnext, iwnext,h) -> snext 
+	!	Therefre, I have to be VERY careful when calculating 4-tuple: i have to go from v(a,s,b) to v(a,w,m,b)
+	!	Therefore we can calculate value functons v(iaprev,sprev,ibprev,t) == v0000 == v(iaprev,(iwprev,imprev),ibprev,t) 
+	!	to v(ianext,snext,ibnext,t) == v1111 == v(ianext,(iwnext,imnext),ibnext,t)
+	!	ON TOP OF THAT, we have TWO value functions, and we have to calculate it for BOTH, that's why I have vn0000 to vn1111
+	!	LET's DO IT EXTRA CAREFULLY
+	!	16 value functions v0000 to v1111
+	!	and 16 vf_na: vn0000 to vn1111
+	
+	!states (0,0) -> (iwprev,imprev); (1,1) -> (iwnext,imnext)
+	state00 = h+nhealth*(imprev-1)+nmedbins*nhealth*(iwprev-1)
+	state01 = h+nhealth*(imnext-1)+nmedbins*nhealth*(iwprev-1)
+	state10 = h+nhealth*(imprev-1)+nmedbins*nhealth*(iwnext-1)
+	state11 = h+nhealth*(imnext-1)+nmedbins*nhealth*(iwnext-1)
+		!0000
+	v0000 	= vf			(iaprev,state00,ibprev,t)
+	vn0000 	= vf_na			(iaprev,state00,ibprev,t,bcalc)
+	a0000 	= assets(pf		(iaprev,state00,ibprev,t))
+	an0000 	= assets(pf_na	(iaprev,state00,ibprev,t,bcalc))
+	l0000 	= lchoice		(iaprev,state00,ibprev,t)
+	ln0000 	= lchoice_na	(iaprev,state00,ibprev,t,bcalc)
+		!0001
+	v0001 	= vf			(iaprev,state00,ibnext,t)
+	vn0001 	= vf_na			(iaprev,state00,ibnext,t,bcalc)
+	a0001 	= assets(pf		(iaprev,state00,ibnext,t))
+	an0001 	= assets(pf_na	(iaprev,state00,ibnext,t,bcalc))
+	l0001 	= lchoice		(iaprev,state00,ibnext,t)
+	ln0001 	= lchoice_na	(iaprev,state00,ibnext,t,bcalc)
+		!0010
+	v0010	= vf			(iaprev,state01,ibprev,t)
+	vn0010	= vf_na			(iaprev,state01,ibprev,t,bcalc)
+	a0010 	= assets(pf		(iaprev,state01,ibprev,t))
+	an0010 	= assets(pf_na	(iaprev,state01,ibprev,t,bcalc))
+	l0010 	= lchoice		(iaprev,state01,ibprev,t)
+	ln0010 	= lchoice_na	(iaprev,state01,ibprev,t,bcalc)
+		!0011
+	v0011	= vf			(iaprev,state01,ibnext,t)
+	vn0011	= vf_na			(iaprev,state01,ibnext,t,bcalc)
+	a0011 	= assets(pf		(iaprev,state01,ibnext,t))
+	an0011 	= assets(pf_na	(iaprev,state01,ibnext,t,bcalc))
+	l0011 	= lchoice		(iaprev,state01,ibnext,t)
+	ln0011 	= lchoice_na	(iaprev,state01,ibnext,t,bcalc)
+		!0100
+	v0100	= vf			(iaprev,state10,ibprev,t)
+	vn0100	= vf_na			(iaprev,state10,ibprev,t,bcalc)
+	a0100 	= assets(pf		(iaprev,state10,ibprev,t))
+	an0100 	= assets(pf_na	(iaprev,state10,ibprev,t,bcalc))
+	l0100 	= lchoice		(iaprev,state10,ibprev,t)
+	ln0100 	= lchoice_na	(iaprev,state10,ibprev,t,bcalc)
+		!0101
+	v0101	= vf			(iaprev,state10,ibnext,t)
+	vn0101	= vf_na			(iaprev,state10,ibnext,t,bcalc)
+	a0101 	= assets(pf		(iaprev,state10,ibnext,t))
+	an0101 	= assets(pf_na	(iaprev,state10,ibnext,t,bcalc))
+	l0101 	= lchoice		(iaprev,state10,ibnext,t)
+	ln0101 	= lchoice_na	(iaprev,state10,ibnext,t,bcalc)
+		!0110
+	v0110	= vf			(iaprev,state11,ibprev,t)
+	vn0110	= vf_na			(iaprev,state11,ibprev,t,bcalc)
+	a0110 	= assets(pf		(iaprev,state11,ibprev,t))
+	an0110 	= assets(pf_na	(iaprev,state11,ibprev,t,bcalc))
+	l0110 	= lchoice		(iaprev,state11,ibprev,t)
+	ln0110 	= lchoice_na	(iaprev,state11,ibprev,t,bcalc)
+		!0111
+	v0111	= vf			(iaprev,state11,ibnext,t)
+	vn0111	= vf_na			(iaprev,state11,ibnext,t,bcalc)
+	a0111 	= assets(pf		(iaprev,state11,ibnext,t))
+	an0111 	= assets(pf_na	(iaprev,state11,ibnext,t,bcalc))
+	l0111 	= lchoice		(iaprev,state11,ibnext,t)
+	ln0111 	= lchoice_na	(iaprev,state11,ibnext,t,bcalc)
+		!1000
+	v1000 	= vf			(ianext,state00,ibprev,t)
+	vn1000 	= vf_na			(ianext,state00,ibprev,t,bcalc)
+	a1000 	= assets(pf		(ianext,state00,ibprev,t))
+	an1000 	= assets(pf_na	(ianext,state00,ibprev,t,bcalc))
+	l1000 	= lchoice		(ianext,state00,ibprev,t)
+	ln1000 	= lchoice_na	(ianext,state00,ibprev,t,bcalc)
+		!1001
+	v1001 	= vf			(ianext,state00,ibnext,t)
+	vn1001 	= vf_na			(ianext,state00,ibnext,t,bcalc)
+	a1001 	= assets(pf		(ianext,state00,ibnext,t))
+	an1001 	= assets(pf_na	(ianext,state00,ibnext,t,bcalc))
+	l1001 	= lchoice		(ianext,state00,ibnext,t)
+	ln1001 	= lchoice_na	(ianext,state00,ibnext,t,bcalc)
+		!1010
+	v1010	= vf			(ianext,state01,ibprev,t)
+	vn1010	= vf_na			(ianext,state01,ibprev,t,bcalc)
+	a1010 	= assets(pf		(ianext,state01,ibprev,t))
+	an1010 	= assets(pf_na	(ianext,state01,ibprev,t,bcalc))
+	l1010 	= lchoice		(ianext,state01,ibprev,t)
+	ln1010 	= lchoice_na	(ianext,state01,ibprev,t,bcalc)
+		!1011
+	v1011	= vf			(ianext,state01,ibnext,t)
+	vn1011	= vf_na			(ianext,state01,ibnext,t,bcalc)
+	a1011 	= assets(pf		(ianext,state01,ibnext,t))
+	an1011 	= assets(pf_na	(ianext,state01,ibnext,t,bcalc))
+	l1011 	= lchoice		(ianext,state01,ibnext,t)
+	ln1011 	= lchoice_na	(ianext,state01,ibnext,t,bcalc)
+		!1100
+	v1100	= vf			(ianext,state10,ibprev,t)
+	vn1100	= vf_na			(ianext,state10,ibprev,t,bcalc)
+	a1100 	= assets(pf		(ianext,state10,ibprev,t))
+	an1100 	= assets(pf_na	(ianext,state10,ibprev,t,bcalc))
+	l1100 	= lchoice		(ianext,state10,ibprev,t)
+	ln1100 	= lchoice_na	(ianext,state10,ibprev,t,bcalc)
+		!1101
+	v1101	= vf			(ianext,state10,ibnext,t)
+	vn1101	= vf_na			(ianext,state10,ibnext,t,bcalc)
+	a1101 	= assets(pf		(ianext,state10,ibnext,t))
+	an1101 	= assets(pf_na	(ianext,state10,ibnext,t,bcalc))
+	l1101 	= lchoice		(ianext,state10,ibnext,t)
+	ln1101 	= lchoice_na	(ianext,state10,ibnext,t,bcalc)
+		!1110
+	v1110	= vf			(ianext,state11,ibprev,t)
+	vn1110	= vf_na			(ianext,state11,ibprev,t,bcalc)
+	a1110 	= assets(pf		(ianext,state11,ibprev,t))
+	an1110 	= assets(pf_na	(ianext,state11,ibprev,t,bcalc))
+	l1110 	= lchoice		(ianext,state11,ibprev,t)
+	ln1110 	= lchoice_na	(ianext,state11,ibprev,t,bcalc)
+		!1111
+	v1111	= vf			(ianext,state11,ibnext,t)
+	vn1111	= vf_na			(ianext,state11,ibnext,t,bcalc)
+	a1111 	= assets(pf		(ianext,state11,ibnext,t))
+	an1111 	= assets(pf_na	(ianext,state11,ibnext,t,bcalc))
+	l1111 	= lchoice		(ianext,state11,ibnext,t)
+	ln1111 	= lchoice_na	(ianext,state11,ibnext,t,bcalc)
+	
+	!check whether individual is: 
+	!1) age<62: can't apply; use only vf_na (not vf)
+	!2) age>=62 AND age<app_age: not yet applied, but we must check whether applies: compare values of two quadrilinear interpolations and use higher one (change app_age if it is the case)
+	!3) age>=62 AND age>age_app: already applied, use only vf (not vf_na)
+	
+	!Before calculating interpolated assets and labor choice, we check if individual is eligible and didn't apply yet. If it's the case, we
+	!switch app_age to a current age
+	
+	if (age>=62 .AND. age<app_age) then 
+		!Here we have to check both cases: applicant and non_applicant; 
+		!if applicant's value is higher, she/he applies, and we swithc app_age to current age and use applicants vf and lchoice;
+		!otherwise, we use vf_na
+		!(x,y,z,q) == (a,w,m,b)
+		vx1 = quadlin(	acur,wcur,mcur,bcur, &
+						assets(iaprev),wage(t,iwprev),mexp(t,h,imprev),ss(ibprev), &
+						assets(ianext),wage(t,iwnext),mexp(t,h,imnext),ss(ibnext), &
+						v0000,v0001,v0010,v0011,v0100,v0101,v0110,v0111, &
+						v1000,v1001,v1010,v1011,v1100,v1101,v1110,v1111)
+		vx2 = quadlin(	acur,wcur,mcur,bcur, &
+						assets(iaprev),wage(t,iwprev),mexp(t,h,imprev),ss(ibprev), &
+						assets(ianext),wage(t,iwnext),mexp(t,h,imnext),ss(ibnext), &
+						vn0000,vn0001,vn0010,vn0011,vn0100,vn0101,vn0110,vn0111, &
+						vn1000,vn1001,vn1010,vn1011,vn1100,vn1101,vn1110,vn1111)
+		if (vx1 >= vx2) then !it is time to apply for ss
+			!SWITCH APPLICATION AGE, MAIN THING HERE!!!
+			app_age = age 
+		endif !otherwise do nothing: individual didn't apply
 	endif
 	
-	!given all this, calculate optimal asset choice next period and labor choice today (using linear interpolation).
-	!update relavant variables
-	if (age<62 .OR. (age>=62 .AND. age<app_age)) then !before individual becomes eligible to social security OR is eligible but doesn't apply for it
-		!For the simulation for age 50-61, we only use value function of "not applied" individual vf_na.
-		app = assets(pf_na(iaprev,curstate,ibprev,t,bcalc)) !optimal choice next period on the gridpoint (iaprev,ibprev)
-		apn = assets(pf_na(ianext,curstate,ibnext,t,bcalc)) !optimal choice next period on the gridpoint (ianext,ibnext)		
-		lpp = lchoice_na(iaprev,curstate,ibprev,t,bcalc) !optimal current labor choice on the gridpoint (iaprev,ibprev)
-		lpn = lchoice_na(ianext,curstate,ibnext,t,bcalc) !optimal current labor choice on the gridpoint (ianext,ibnext)
-		!--------------------------------------------------------------------------------------------------------------------
-		!now use pythagorean theorem and similar triangles to calculate an approximate points in (asset,benefit,asset')-space and (asset,benefit,lchoice)-space (linearly projected)
-		!assets next period (linear interpolation)
-		apx = app + (apn-app)*distance2d(acur,bcur,assets(iaprev),ss(ibprev))/ &
-				distance2d(assets(ianext),ss(ibnext),assets(iaprev),ss(iaprev))	!linear intrapolation between points for the optimal choice next period
-		
-		!given this, update acur for the next iteration
-		acur = apx !notice, that we will put this value into the vector of lifetime assets in the beginning of next cycle
-		
-		!current optimal labor choice: linear interpolation
-		lpx = lpp + (lpn-lpp)*distance2d(acur,bcur,assets(iaprev),ss(ibprev))/ &
-				distance2d(assets(ianext),ss(ibnext),assets(iaprev),ss(iaprev)) !linear interpolation for optimal choice of labor given current asset (off the grid)	
-		!put this into personal working history
-		life_labor(t) = lpx
-		!update number of working years (if individual worked)
-		if (lpx>0) then
-			workyears = workyears+1
-		endif	
-		
-		!--------------------------------------------------------------------------------------------------------------------		
-		!We need to update aime
-		
+	!NOW, we calculate interpolated assets and labor
+	if (age<62 .OR. (age>=62 .AND. age<app_age)) then !individual 1) can't apply or 2) can but doesn't (we checked it before)
+		!Here, we only use vf_na to construct current assets and labor choice; quadlin
+		!(x,y,z,q) == (a,w,m,b)
+		apx = quadlin(	acur,wcur,mcur,bcur, &
+						assets(iaprev),wage(t,iwprev),mexp(t,h,imprev),ss(ibprev), &
+						assets(ianext),wage(t,iwnext),mexp(t,h,imnext),ss(ibnext), & 
+						an0000,an0001,an0010,an0011,an0100,an0101,an0110,an0111, &
+						an1000,an1001,an1010,an1011,an1100,an1101,an1110,an1111)
+		lpx = quadlin(	acur,wcur,mcur,bcur, &
+						assets(iaprev),wage(t,iwprev),mexp(t,h,imprev),ss(ibprev), &
+						assets(ianext),wage(t,iwnext),mexp(t,h,imnext),ss(ibnext), & 
+						ln0000,ln0001,ln0010,ln0011,ln0100,ln0101,ln0110,ln0111, &
+						ln1000,ln1001,ln1010,ln1011,ln1100,ln1101,ln1110,ln1111)
+						
+		!we have to update AIME
 		if (bcalc == 1) then !individual worked less than 35 years
 			aime = aime + wage(t,w)*lpx/35.0 		      !next period aime grows              
 		else !individual aready has more than 35 working years
 			aime = aime + max(0.0,(wage(t,w)*lpx-aime)/35.0) !next-period aime doesn't decline
-		endif		
-		!--------------------------------------------------------------------------------------------------------------------		
-	else	
-		!individual applied for social security before OR this period: (age>=app_age)
-		!thus, for calculations we use vf and pf for those who applied
-		app = assets(pf(iaprev,curstate,ibprev,t))
-		apn = assets(pf(ianext,curstate,ibnext,t))		
-		lpp = lchoice(iaprev,curstate,ibprev,t)
-		lpn = lchoice(ianext,curstate,ibnext,t) 
-		apx = app + (apn-app)*distance2d(acur,bcur,assets(iaprev),ss(ibprev))/ &
-				distance2d(assets(ianext),ss(ibnext),assets(iaprev),ss(iaprev))	!linear intrapolation between points for the optimal choice next period		
-		!given this, update acur for the next iteration
-		acur = apx	!notice, that we will put this value into the vector of lifetime assets in the beginning of next cycle	
-		!current optimal labor choice: linear interpolation
-		lpx = lpp + (lpn-lpp)*distance2d(acur,bcur,assets(iaprev),ss(ibprev))/ &
-				distance2d(assets(ianext),ss(ibnext),assets(iaprev),ss(iaprev)) !linear interpolation for optimal choice of labor given current asset (off the grid)	
-		!put this into personal working history
-		life_labor(t) = lpx
-		!here, we don't care about total working years and benefit updating anymore
-		!--------------------------------------------------------------------------------------------------------------------
+		endif
+		
+		!update number of working years (if individual worked)
+		if (lpx>0) then
+			workyears = workyears+1
+		endif
+	elseif (age>=62 .AND. age>=app_age) then !individual applied		
+		!calculate interpolated assets and labor choice using functions of applicants
+		apx = quadlin(	acur,wcur,mcur,bcur, &
+						assets(iaprev),wage(t,iwprev),mexp(t,h,imprev),ss(ibprev), &
+						assets(ianext),wage(t,iwnext),mexp(t,h,imnext),ss(ibnext), & 
+						a0000,a0001,a0010,a0011,a0100,a0101,a0110,a0111, &
+						a1000,a1001,a1010,a1011,a1100,a1101,a1110,a1111)
+		lpx = quadlin(	acur,wcur,mcur,bcur, &
+						assets(iaprev),wage(t,iwprev),mexp(t,h,imprev),ss(ibprev), &
+						assets(ianext),wage(t,iwnext),mexp(t,h,imnext),ss(ibnext), & 
+						l0000,l0001,l0010,l0011,l0100,l0101,l0110,l0111, &
+						l1000,l1001,l1010,l1011,l1100,l1101,l1110,l1111)
+		!In this case, we don't care about the AIME and working years anymore, it doesn't play any role
+	else !Excluded case, just fishing for errors
+		print *, "Wrong scenario, check SS applicaton code in lc_simulation"
+		stop 
 	endif
 	
-	life_earnings(t) = 	wage(t,w)*life_labor(t)
-	life_medexp(t) = mexp(t,h,m)
+	!given this, update acur for the next iteration
+	acur = apx	!notice, that we will put this value into the vector of lifetime assets in the beginning of next cycle	
+	!put labor into personal working history
+	
+	!	D) LABOR HISTORY UPDATE
+	life_labor(t) = lpx
+	!Fill in individual history	
+	
+	!	E) EARNINGS HISTORY UPDATE
+	life_earnings(t) = 	wcur*life_labor(t)
+	
 	
 	!now, we need to update state, using transition matrix
 	call random_number(rndnum)
-	nextstate = locate_greater(transmat(curstate,:,t),rndnum) - 1
+	!nextstate = locate_greater(transmat(curstate,:,t),rndnum) - 1 !wrong, I have to use cumulative sum
 enddo
 
 
