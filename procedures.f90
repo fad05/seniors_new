@@ -270,10 +270,11 @@ use parameters
 !function takes taxable income as input and
 !spits out taxes to pay
 real (kind = 8), intent(in) :: income 
-real tax_rate
+real tax_rate, income_in_thousands
 real income_tax
 
-tax_rate = btax*(1.0-(1.0+stax*income**ptax)**(-1.0/ptax))
+income_in_thousands = income/1000 !formula uses income in thousands of dollars of 2000
+tax_rate = btax*(1.0-(1.0+stax*income_in_thousands**ptax)**(-1.0/ptax))
 income_tax = income*tax_rate
 
 end function income_tax

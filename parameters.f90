@@ -2,6 +2,8 @@ module parameters
     integer, parameter :: grid_asset = 11, grid_ss = 11 ,nwagebins = 5, nmedbins = 5, ntypes = 8, nhealth = 2
     integer, parameter :: lifespan = 41, ltot = 4800, kappa = 900, d = 100000
     integer, parameter :: statesize = nwagebins*nmedbins*nhealth
+    integer, parameter :: nsim = 1000 !number of simulations
+    integer, parameter :: init_workyears = 25
     real (kind = 8), parameter ::  beta = 0.95d0, delta = 0.2d0, eta = 1.8d0, r = 2.0d-2, sigma = 3.75d0, ugamma = 0.5d0
     real (kind = 8), parameter :: tol = 1.0d-6, asset_min = 1.0d3, asset_max = 5.0d5, cmin = 2600
     !inflation adjustment : http://data.bls.gov/cgi-bin/cpicalc.pl
@@ -25,14 +27,16 @@ module parameters
     
     !Taxation and ss taxation
     !tax formula is of the form: tax(y) = b*(1-(s*y**p+1)**(-1/p)); numbers are taken from Guner etal, 2014(RED)
-    real (kind = 8), parameter :: btax = 2.64d-1, stax = 1.2d-2, ptax = 9.64d-1
+    real (kind = 8), parameter :: btax = 2.64d-1, stax = 1.36d-2, ptax = 9.64d-1 !stax is adjusted: stax  = s(from paper)/f^(-p); f = CPI2005/CPI2000 = 1.13416; s = 0.012
     !taxation of benefits
     real (kind = 8), parameter :: first_treshold(2) = (/2.5d4,3.2d4/), second_treshold(2) = (/3.4d4,4.4d4/)
     
     !Initial lognormal distributions, for two cohorts (for now, only condition on cohorts)
-    real (kind = 8), parameter :: laime50_sigma(2) = (/0.82d0,0.82d0/), laime50_mu(2) = (/9.8d0,9.8d0/) !log aime
-    real (kind = 8), parameter :: las50_sigma(2) = (/2.17d0,2.17d0/), las50_mu(2) = (/1.0d1,1.0d1/) !log assets
+    real (kind = 8), parameter :: laime50_sigma(2) = (/0.82d0,0.82d0/), laime50_mu(2) = (/9.6d0,9.6d0/) !log aime
+    real (kind = 8), parameter :: las50_sigma(2) = (/2.17d0,2.17d0/), las50_mu(2) = (/1.2d1,1.2d1/) !log assets
     real (kind = 8), parameter :: rho_laa(2) = (/0.12d0,0.12d0/) !correlation coefficient
+    real (kind = 8), parameter :: prob_a0 = 0.15 !probability of zero assets
+    real (kind = 8), parameter :: laime50_mu_a0 = 9.6d0, laime50_sigma_a0 = 0.80d0 !normal distribution when assets are 0
     
      save
 end module parameters

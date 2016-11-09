@@ -4,6 +4,8 @@ program main
 
 use parameters
 use procedures
+use csv_file
+use random
 implicit none
 
 
@@ -37,11 +39,13 @@ subroutine labchoice (lchoice, cons, util, acur,anext, h, wage, mexp)
     real (kind = 8), intent(out) :: util !value of utility under optimal choice
 end subroutine labchoice
 subroutine lc_simulation(cohort,in_asset,in_aime,years_aime,wage,logwage,wzmean,wzsd,mexp,logmexp,mzmean,mzsd, &
-						ms,transmat,vf,vf_na,pf,pf_na,lchoice,lchoice_na,app_policy,life_assets,life_labor,app_age)
+						ms,transmat,vf,vf_na,pf,pf_na,lchoice,lchoice_na,app_policy, surv, &
+						life_assets,life_labor,life_earnings, life_wage, life_medexp,app_age,tn_seed)
 	use parameters
 	use procedures
 	integer, intent(in) :: cohort
-	real (kind = 8), intent(in) :: in_asset, in_aime, years_aime
+	real (kind = 8), intent(in) :: in_asset, in_aime
+	integer, intent(in) :: years_aime
 	real (kind = 8), dimension(lifespan,nwagebins), intent(in) :: wage
 	real (kind = 8), dimension(lifespan), intent(in) :: wzmean, wzsd,logwage
 	real (kind = 8), dimension(lifespan,nhealth,nmedbins), intent(in) :: mexp
@@ -54,9 +58,13 @@ subroutine lc_simulation(cohort,in_asset,in_aime,years_aime,wage,logwage,wzmean,
 	real (kind = 8), dimension(grid_asset,statesize,grid_ss,lifespan+1,2), intent(in) :: vf_na
 	integer, dimension(grid_asset,statesize,grid_ss,lifespan,2), intent(in) :: pf_na
 	real (kind = 8), dimension(grid_asset,statesize,grid_ss,lifespan,2), intent(in) :: app_policy
+	real (kind = 8), dimension(lifespan,nhealth), intent(in) :: surv
 	real (kind = 8), dimension(grid_asset,statesize,grid_ss,lifespan,2), intent(in) :: lchoice_na
-	real (kind = 8), intent(out) :: life_assets(lifespan+1), life_labor(lifespan)
+	real (kind = 8), intent(out) :: life_assets(lifespan+1)
+	real (kind = 8), dimension(lifespan), intent(out) :: life_labor, life_earnings, life_wage, life_medexp
 	integer, intent(out) :: app_age
+	integer, intent(inout) :: tn_seed
+
 end subroutine lc_simulation
 end interface
 
@@ -105,7 +113,8 @@ integer, dimension(grid_asset,statesize,grid_ss,lifespan,2) :: pf_na
 real (kind = 8), dimension(grid_asset,statesize,grid_ss,lifespan,2) :: app_policy
 real (kind = 8), dimension(grid_asset,statesize,grid_ss,lifespan,2) :: lchoice_na
 !results of simulation
-real (kind = 8) life_assets(lifespan+1), life_labor(lifespan)
+real (kind = 8)  life_assets(lifespan+1)
+real (kind = 8), dimension(lifespan) :: life_labor, life_earnings, life_wage, life_medexp
 integer app_age
 	
 	
@@ -113,6 +122,25 @@ integer i,j,k,l,t,w,wn,m,mn,h,hn,ind_type
 integer :: cohort, sex, college, health, age(lifespan) = (/(i,i=50,90)/)
 integer ms(statesize,3)
 
+!variables necessary to use "random" module;
+!to draw from bivariate normal
+real mu_vec(2), var_vec(4) !vector of means and variance-covariance matrix for bivariate normal draws
+real f_chol(4) !LOWER TRIANGULAR DECOMPOSITION OF VARIANCE MATRIX
+real bivarn_draw(2) !a draw from bivariate normal
+integer ier !    ier = 1 if the input covariance matrix is not +ve definite
+!    FIRST = .TRUE. IF THIS IS THE FIRST CALL OF THE ROUTINE
+!    OR IF THE DISTRIBUTION HAS CHANGED SINCE THE LAST CALL OF THE ROUTINE.
+!    OTHERWISE SET TO .FALSE.
+!            (INPUT,LOGICAL)
+logical first 
+
+!Variables necessary to make random draws
+integer :: tn_seed
+integer seed_size
+integer, allocatable :: seed(:)
+real (kind = 8) rndnum
+
+real (kind = 8) :: in_aime, in_asset ! initial values of aime and assets drawn from distribution
 
 
 !PROGRAM BODY
@@ -278,9 +306,71 @@ lchoice = -10
 call valfun(cohort,wagegrid(:,:,ind_type),mexpgrid(:,:,:,ind_type),transmat(:,:,:,ind_type),surv(:,:,ind_type),ms, &
 vf,vf_na,pf,pf_na,lchoice,lchoice_na,app_policy)
 
-call lc_simulation(cohort,1.5d4,0.8d3,2.5d1, wagegrid(:,:,ind_type),logwage(:,ind_type),wzmean(:,ind_type),wzsd(:,ind_type), &
-mexpgrid(:,:,:,ind_type),logmexp(:,:,ind_type),mzmean(:,:,ind_type),mzsd(:,:,ind_type), ms, &
-transmat(:,:,:,ind_type),vf,vf_na,pf,pf_na,lchoice,lchoice_na,app_policy, life_assets,life_labor,app_age)
+!MAIN SIMULATION CYCLE
+!first, initialize a randomizer
+call random_seed(seed_size)
+allocate(seed(seed_size))
+seed = 100 !fix seed to have reproducible results
+call random_seed(put = seed) !start new random sequence
+deallocate(seed)
+!seed truncated normal
+tn_seed = 100
+
+!open files to save results
+open(unit=11,file='data_output/life_assets.txt',status='replace')
+open(unit=12,file='data_output/life_labor.txt',status='replace')
+open(unit=13,file='data_output/life_earnings.txt',status='replace')
+open(unit=14,file='data_output/life_wage.txt',status='replace')
+open(unit=15,file='data_output/life_medexp.txt',status='replace')
+open(unit=16,file='data_output/app_age.txt',status='replace')
+
+do i = 1,nsim !simulate "nsim" individuals of given type
+	!draw initial log aime and log assets from bivariate normal
+	
+	call random_number(rndnum)
+	if (rndnum > prob_a0) then !draw from bivariate with nonzero assets
+		mu_vec = (/laime50_mu(cohort),las50_mu(cohort)/)
+		var_vec = (/laime50_sigma(cohort)**2,	laime50_sigma(cohort)*las50_sigma(cohort)*rho_laa(cohort), &
+					laime50_sigma(cohort)*las50_sigma(cohort)*rho_laa(cohort),	las50_sigma(cohort)**2/)
+		if (i == 1) then
+			first = .TRUE.
+		else
+			first = .FALSE.
+		endif
+		call random_mvnorm(2, mu_vec, var_vec, f_chol, first, bivarn_draw, ier)
+		in_aime = real(exp(bivarn_draw(1)),8)
+		in_asset = real(exp(bivarn_draw(2)),8)
+	else	!draw from univariate with zero assets
+		in_aime = laime50_mu_a0 + random_normal()*laime50_sigma_a0
+		in_aime = exp(in_aime)
+		in_asset = 0.0d0
+	endif
+!	if (i == 97) then
+!		read (*,*)
+!	endif
+	call lc_simulation(cohort,in_asset,in_aime,init_workyears, wagegrid(:,:,ind_type), &
+				logwage(:,ind_type),wzmean(:,ind_type),wzsd(:,ind_type), &
+				mexpgrid(:,:,:,ind_type),logmexp(:,:,ind_type),mzmean(:,:,ind_type),mzsd(:,:,ind_type), ms, &
+				transmat(:,:,:,ind_type),vf,vf_na,pf,pf_na,lchoice,lchoice_na,app_policy, surv(:,:,ind_type), &
+				life_assets,life_labor,life_earnings, life_wage, life_medexp,app_age,tn_seed)
+	!save the simulation results to .csv files
+	do j = 11,16 
+		call csv_write(j,i,.false.) !put the simulation number in the begining of the line, not advancing to next line
+	enddo
+	
+	!write vectors and advance to next line
+	call csv_write(11,life_assets,.true.)
+	call csv_write(12,life_labor,.true.)
+	call csv_write(13,life_earnings,.true.)
+	call csv_write(14,life_wage,.true.)
+	call csv_write(15,life_medexp,.true.)
+	call csv_write(16,app_age,.true.)
+enddo
+
+!close opened files
+do i = 11,16
+	close(i)
+enddo
 
 !		END TESTING
 !-----------------------------------------------------------------------
@@ -652,7 +742,8 @@ subroutine valfun(cohort,wage,medexp,transmat,surv,ms,vf,vf_na,pf,pf_na,lchoice,
 end subroutine valfun
 
 subroutine lc_simulation(cohort,in_asset,in_aime,years_aime,wage,logwage,wzmean,wzsd,mexp,logmexp,mzmean,mzsd, &
-						ms,transmat,vf,vf_na,pf,pf_na,lchoice,lchoice_na,app_policy,life_assets,life_labor,app_age)
+						ms,transmat,vf,vf_na,pf,pf_na,lchoice,lchoice_na,app_policy, surv, &
+						life_assets,life_labor,life_earnings, life_wage, life_medexp,app_age,tn_seed)
 !this subroutine simulates the life cycle of an individual given:
 !-cohort
 !-initial assets
@@ -666,7 +757,8 @@ use parameters
 use procedures
 implicit none
 integer, intent(in) :: cohort
-real (kind = 8), intent(in) :: in_asset, in_aime, years_aime
+real (kind = 8), intent(in) :: in_asset, in_aime
+integer, intent(in) :: years_aime
 real (kind = 8), dimension(lifespan,nwagebins), intent(in) :: wage
 real (kind = 8), dimension(lifespan), intent(in) :: wzmean, wzsd,logwage
 real (kind = 8), dimension(lifespan,nhealth,nmedbins), intent(in) :: mexp
@@ -679,27 +771,28 @@ real (kind = 8), intent(in) :: lchoice(grid_asset,statesize,grid_ss,lifespan)
 real (kind = 8), dimension(grid_asset,statesize,grid_ss,lifespan+1,2), intent(in) :: vf_na
 integer, dimension(grid_asset,statesize,grid_ss,lifespan,2), intent(in) :: pf_na
 real (kind = 8), dimension(grid_asset,statesize,grid_ss,lifespan,2), intent(in) :: app_policy
+real (kind = 8), dimension(lifespan,nhealth), intent(in) :: surv
 real (kind = 8), dimension(grid_asset,statesize,grid_ss,lifespan,2), intent(in) :: lchoice_na
-real (kind = 8), intent(out) :: life_assets(lifespan+1), life_labor(lifespan)
+real (kind = 8), intent(out) :: life_assets(lifespan+1)
+real (kind = 8), dimension(lifespan), intent(out) :: life_labor, life_earnings, life_wage, life_medexp
 integer, intent(out) :: app_age !the variable wil contain age of social security application
-
+integer, intent(inout) :: tn_seed
 
 
 !LOCAL VARIABLES
-real (kind = 8) life_earnings(lifespan), life_wage(lifespan), life_medexp(lifespan)
 real (kind = 8) anext, workyears, aime, apx, lpx, acur, wcur, mcur, bcur, vx1,vx2
 real (kind = 8) wage_tn, med_tn !wage and medical expenses drawn from truncated normal
 integer iaprev, ianext, ibprev, ibnext
 integer iwprev,iwnext,imprev,imnext !indices of previous and next gridpoints in (w,m) - space
 
 
-real (kind = 8) rndnum, statvec(statesize), cumstvec(statesize)
+real (kind = 8) rndnum, statvec(statesize), cumstvec(statesize), cumtrans(statesize)
 real (kind = 8) assets(grid_asset), ss(grid_ss)
-integer t, curstate, nextstate , bcalc, age, seed_size
+real (kind = 8) bound !variable used to calculate truncation bound for truncated normal
+integer t, curstate, nextstate , bcalc, age
 integer w,m,h !wage, med, health index
-integer, allocatable :: seed(:)
-integer :: tn_seed = 10000
-real (kind = 8) :: tn_sigma = 1.5d0, tn_mu = 0.0d0, tn_samp
+integer death_age
+
 
 !Value function polygone vertices for linear interpolation for vf, assets, labor
 real (kind = 8) v0000,v0001,v0010,v0011,v0100,v0101,v0110,v0111, &
@@ -718,12 +811,7 @@ real (kind = 8) ln0000,ln0001,ln0010,ln0011,ln0100,ln0101,ln0110,ln0111, &
 !Corresponding state values in s-space
 integer state00, state01,state10,state11
 
-!determine initial state
-call random_seed(seed_size)
-allocate(seed(seed_size))
-seed = 100 !fix seed to have reproducible results
-call random_seed(put = seed) !start new random sequence
-deallocate(seed)
+
 
 !initialize vectors
 life_earnings 	= -1.0d0
@@ -739,9 +827,6 @@ call logspace(asset_min,asset_max,grid_asset-1,assets(2:grid_asset))
 call logspace(ss_min,ss_max,grid_ss-1,ss(2:grid_ss))
 
 
-!test truncated normal
-
-!call truncated_normal_ab_sample(tn_mu,tn_sigma,-2.0d0,1.d0,tn_seed,tn_samp)
 !------------------------------------------
 !calculate initial stationry distribution of states at age 50 and determine initial state by random draw
 call stationary_dist(transmat(:,:,1),statvec)
@@ -775,11 +860,15 @@ do t = 1,lifespan
 		call truncated_normal_ab_sample(wzmean(t),wzsd(t),wzmean(t)+wzsd(t)*(w-3.5), &
 										wzmean(t)+wzsd(t)*(w-2.5),tn_seed,wage_tn)
 	elseif (w == 1) then
-		call truncated_normal_ab_sample(wzmean(t),wzsd(t),wage(t,1), &
+		!calculate lower bound of RESIDUAL; it must be negative here!
+		bound = log(wage(t,1)) - logwage(t)
+		call truncated_normal_ab_sample(wzmean(t),wzsd(t),bound, &
 										wzmean(t)-1.5*wzsd(t),tn_seed,wage_tn)
 	elseif (w == nwagebins) then
+		!calculate upper bound of RESIDUAL; it must be positive here!
+		bound = log(wage(t,nwagebins)) - logwage(t)
 		call truncated_normal_ab_sample(wzmean(t),wzsd(t),wzmean(t)+1.5*wzsd(t), &
-										wage(t,nwagebins),tn_seed,wage_tn)
+										bound,tn_seed,wage_tn)
 	else
 		print *, "Something's wrong with current wage state"
 		read (*,*)
@@ -804,11 +893,15 @@ do t = 1,lifespan
 		call truncated_normal_ab_sample(mzmean(t,h),mzsd(t,h),mzmean(t,h)+mzsd(t,h)*(m-3.5), &
 										mzmean(t,h)+mzsd(t,h)*(m-2.5),tn_seed,med_tn)
 	elseif (m == 1) then
-		call truncated_normal_ab_sample(mzmean(t,h),mzsd(t,h),mexp(t,h,1), &
+		!lower bound
+		bound = log(mexp(t,h,1)) - logmexp(t,h)
+		call truncated_normal_ab_sample(mzmean(t,h),mzsd(t,h), bound, &
 										mzmean(t,h)-1.5*mzsd(t,h),tn_seed,med_tn)
 	elseif (m == nmedbins) then
+		!upper bound
+		bound = log(mexp(t,h,nmedbins)) - logmexp(t,h)
 		call truncated_normal_ab_sample(mzmean(t,h),mzsd(t,h),mzmean(t,h)+1.5*mzsd(t,h), &
-										mexp(t,h,nmedbins),tn_seed,med_tn)
+										bound,tn_seed,med_tn)
 	else
 		print *, "Something's wrong with current med exp state"
 		read (*,*)
@@ -1021,9 +1114,9 @@ do t = 1,lifespan
 						
 		!we have to update AIME
 		if (bcalc == 1) then !individual worked less than 35 years
-			aime = aime + wage(t,w)*lpx/35.0 		      !next period aime grows              
+			aime = aime + wcur*lpx/35.0 		      !next period aime grows              
 		else !individual aready has more than 35 working years
-			aime = aime + max(0.0,(wage(t,w)*lpx-aime)/35.0) !next-period aime doesn't decline
+			aime = aime + max(0.0,(wcur*lpx-aime)/35.0) !next-period aime doesn't decline
 		endif
 		
 		!update number of working years (if individual worked)
@@ -1061,10 +1154,27 @@ do t = 1,lifespan
 	
 	
 	!now, we need to update state, using transition matrix
+	call cumsum(transmat(curstate,:,t),cumtrans)
 	call random_number(rndnum)
-	!nextstate = locate_greater(transmat(curstate,:,t),rndnum) - 1 !wrong, I have to use cumulative sum
+	nextstate = locate_greater(cumtrans,rndnum)
+	
+	!Check if an individual survives to the next period
+	call random_number(rndnum)
+	if (rndnum > surv(t,h)) then !a person is dead
+		life_assets(t+2:lifespan+1) = -1
+		life_labor(t+1:lifespan) 	= -1
+		life_wage(t+1:lifespan) 	= -1
+		life_earnings(t+1:lifespan) = -1
+		life_medexp(t+1:lifespan) 	= -1
+		if (app_age>age) then !individual didn't apply for the benefits
+			app_age = -1
+		endif
+		
+		exit !exit DO loop
+	endif
 enddo
 
+life_assets(t+1) = acur
 
 end subroutine lc_simulation
 
