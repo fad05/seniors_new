@@ -38,5 +38,8 @@ module parameters
     real (kind = 8), parameter :: prob_a0 = 0.15 !probability of zero assets
     real (kind = 8), parameter :: laime50_mu_a0 = 9.6d0, laime50_sigma_a0 = 0.80d0 !normal distribution when assets are 0
     
+    !Earning test exempt amounts
+    real (kind = 8), parameter :: et_2005 = 12000 !exempt amount of young cohort: 62-66
+    real (kind = 8), parameter :: et_1994 = (/10593,14704/) !two exempt amounts for old cohort: 62-65 and 66-70 years of age
      save
 end module parameters

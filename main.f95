@@ -38,8 +38,8 @@ subroutine labchoice (lchoice, cons, util, acur,anext, h, wage, mexp)
     real (kind = 8), intent(out) :: cons !consumption under optimal choice
     real (kind = 8), intent(out) :: util !value of utility under optimal choice
 end subroutine labchoice
-subroutine lc_simulation(cohort,in_asset,in_aime,years_aime,wage,logwage,wzmean,wzsd,mexp,logmexp,mzmean,mzsd, &
-						ms,transmat,vf,vf_na,pf,pf_na,lchoice,lchoice_na,app_policy, surv, &
+subroutine lc_simulation(cohort,in_asset,in_aime,years_aime,wage,logwage,wzmean,wzsd,wbinborders,mexp,logmexp,mzmean,mzsd, &
+						mbinborders,ms,transmat,vf,vf_na,pf,pf_na,lchoice,lchoice_na,app_policy, surv, &
 						life_assets,life_labor,life_earnings, life_wage, life_medexp,app_age,tn_seed)
 	use parameters
 	use procedures
@@ -48,6 +48,7 @@ subroutine lc_simulation(cohort,in_asset,in_aime,years_aime,wage,logwage,wzmean,
 	integer, intent(in) :: years_aime
 	real (kind = 8), dimension(lifespan,nwagebins), intent(in) :: wage
 	real (kind = 8), dimension(lifespan), intent(in) :: wzmean, wzsd,logwage
+	real (kind = 8), intent(in) :: wbinborders(lifespan,nwagebins+1), mbinborders(lifespan,nmedbins+1)
 	real (kind = 8), dimension(lifespan,nhealth,nmedbins), intent(in) :: mexp
 	real (kind = 8), dimension(lifespan,nhealth), intent(in) :: mzmean, mzsd,logmexp
 	integer, dimension(statesize,3), intent(in) :: ms
@@ -81,8 +82,9 @@ real (kind = 8) statvec(statesize), cumstvec(statesize) !stationary distribution
 !	4.	rule of how bins are organised : -inf<mu-1.5sd<mu-0.5sd<m+0.5sd<mu+1.5sd<+inf; 
 !	3.	mean and as of parenting normal. Then, given the rule the bins are organised as above, I make a necessary draw from truncated normal!
 real (kind = 8) logwagedata(lifespan,3,ntypes), logwage(lifespan,ntypes), wzmean(lifespan,ntypes), wzsd(lifespan,ntypes) 
-real (kind = 8) wagegrid(lifespan,nwagebins,ntypes) !wage grid points
+real (kind = 8) wagegrid(lifespan,nwagebins,ntypes) !wage grid points, on bin means
 real (kind = 8) wagetrans(nwagebins,nwagebins,lifespan-1) !transition matrix between wage bins
+real (kind = 8) wbinborders(lifespan,nwagebins+1) !n bins => n+1 borders
 !-------------------------------
 !new variables related to medical expenditure
 !for each age, each type, and health the entry of logmexpdata will contain three values: (1. predicted mean log wage, 2. mean and 3. sd of parenting normal distribution of residuals at this age)
@@ -93,8 +95,10 @@ real (kind = 8) wagetrans(nwagebins,nwagebins,lifespan-1) !transition matrix bet
 !	3.	mean and as of parenting normal. Then, given the rule the bins are organised as above, I make a necessary draw from truncated normal!
 real (kind = 8) logmexpdata(lifespan,3,nhealth,ntypes), logmexp(lifespan,nhealth,ntypes), &
 				mzmean(lifespan,nhealth,ntypes), mzsd(lifespan,nhealth,ntypes) 
-real (kind = 8) mexpgrid(lifespan,nhealth,nmedbins,ntypes)
+real (kind = 8) mexpgrid(lifespan,nhealth,nmedbins,ntypes) !med grid, on bin means
 real (kind = 8) medtrans(nmedbins,nmedbins,lifespan-1)
+real (kind = 8) mbinborders(lifespan,nmedbins+1) !n bins => n+1 borders
+
 !-------------------------------
 real (kind = 8) bin_mean !intermediate variable
 !-------------------------------
@@ -186,6 +190,18 @@ enddo
 !2.	Construct wage and medical expenses grids
 !Import a wage profile, profile of sd and mean of parenting normal distribution (which we are going to use to draw a wage)
 !		And med exp profile, profile of sd and mean of parenting normal distribution (which we are going to use to draw a med exp), additionally conditional on health
+
+!!!! IMPROVE HERE
+! 1. Import matrices of bin borders
+! 2. Recalculate grid points
+
+!1. Matrices of bin borders
+WRITE(datafile,'(a,i1,a)') "data_inputs/wagebin_borders_smooth.csv"
+call import_data(datafile,wbinborders)
+
+WRITE(datafile,'(a,i1,a)') "data_inputs/medbin_borders_smooth.csv"
+call import_data(datafile,mbinborders)
+
 do i = 1,ntypes
 	!import from a proper file
 	WRITE(datafile,'(a,i1,a)') "data_inputs/lwage_smooth_",i,".csv"
@@ -194,23 +210,14 @@ do i = 1,ntypes
 	wzmean(:,i) = logwagedata(:,2,i)
 	wzsd(:,i) = logwagedata(:,3,i)
 	!construct a wage grid: 
-	!for every type, for every age, construct a mean of corresponding wage bin from truncated normal distribition
-	!remember, residuals are distributed normally, but they are devidations from the log mean
-	!we do it in a few steps:
-	do k = 1,nwagebins !for every bin
-		do t = 1,lifespan !for every age
-			!1. calculate a mean of residual in that bin
-			if (k == 1) then !first bin
-				call truncated_normal_b_mean (wzmean(t,i), wzsd(t,i), wzmean(t,i)-1.5*wzsd(t,i),bin_mean) !calculate mean of the bin
-			elseif (k == nwagebins) then !last bin
-				call truncated_normal_a_mean (wzmean(t,i), wzsd(t,i), wzmean(t,i)+1.5*wzsd(t,i),bin_mean)
-			else !interior bins
-				call truncated_normal_ab_mean (wzmean(t,i), wzsd(t,i), wzmean(t,i)+wzsd(t,i)*(k-3.5), &
-												wzmean(t,i)+wzsd(t,i)*(k-2.5), bin_mean)
-			endif
-			wagegrid(t,k,i) = exp(logwage(t,i)+bin_mean)  !calculate real wage (exponent of mean log wage plus bin average)
-		enddo 
+	!values of wage on the borders of bins
+	do k = 1,nwagebins+1
+		do t = 1,lifespan
+			call truncated_normal_ab_mean (wzmean(t,i), wzsd(t,i), wbinborders(t,k), wbinborders(t,k+1), bin_mean)
+			wagegrid(t,k,i) = exp(logwage(t,i)	+	bin_mean)
+		enddo
 	enddo
+	
 	
 !Same for medical expenses, additionally condition on health	
 	do j = 1,nhealth
@@ -219,18 +226,10 @@ do i = 1,ntypes
 		logmexp(:,j,i) = logmexpdata(:,1,j,i)
 		mzmean(:,j,i) = logmexpdata(:,2,j,i)
 		mzsd(:,j,i) = logmexpdata(:,3,j,i)
-		do k = 1,nmedbins !for every bin
-			do t = 1,lifespan !for every age
-				!1. calculate a mean of residual in that bin
-				if (k == 1) then !first bin
-					call truncated_normal_b_mean (mzmean(t,j,i), mzsd(t,j,i), mzmean(t,j,i)-1.5*mzsd(t,j,i),bin_mean) !calculate mean of the bin
-				elseif (k == nmedbins) then !last bin
-					call truncated_normal_a_mean (mzmean(t,j,i), mzsd(t,j,i), mzmean(t,j,i)+1.5*mzsd(t,j,i),bin_mean)
-				else !interior bins
-					call truncated_normal_ab_mean (mzmean(t,j,i), mzsd(t,j,i), mzmean(t,j,i)+mzsd(t,j,i)*(k-3.5), &
-													mzmean(t,j,i)+mzsd(t,j,i)*(k-2.5), bin_mean)
-				endif
-				mexpgrid(t,j,k,i) = exp(logmexp(t,j,i)+bin_mean)  !calculate real med exp (exponent of mean log med exp plus bin average)
+		do k = 1,nmedbins+1
+			do t = 1,lifespan
+				call truncated_normal_ab_mean (mzmean(t,j,i), mzsd(t,j,i), mbinborders(t,k), mbinborders(t,k+1), bin_mean)
+				mexpgrid(t,j,k,i) = exp(logmexp(t,j,i)	+	bin_mean)
 			enddo
 		enddo
 	enddo
@@ -349,9 +348,9 @@ do i = 1,nsim !simulate "nsim" individuals of given type
 !		read (*,*)
 !	endif
 	call lc_simulation(cohort,in_asset,in_aime,init_workyears, wagegrid(:,:,ind_type), &
-				logwage(:,ind_type),wzmean(:,ind_type),wzsd(:,ind_type), &
-				mexpgrid(:,:,:,ind_type),logmexp(:,:,ind_type),mzmean(:,:,ind_type),mzsd(:,:,ind_type), ms, &
-				transmat(:,:,:,ind_type),vf,vf_na,pf,pf_na,lchoice,lchoice_na,app_policy, surv(:,:,ind_type), &
+				logwage(:,ind_type),wzmean(:,ind_type),wzsd(:,ind_type), wbinborders, &
+				mexpgrid(:,:,:,ind_type),logmexp(:,:,ind_type),mzmean(:,:,ind_type),mzsd(:,:,ind_type), mbinborders, &
+				ms, transmat(:,:,:,ind_type),vf,vf_na,pf,pf_na,lchoice,lchoice_na,app_policy, surv(:,:,ind_type), &
 				life_assets,life_labor,life_earnings, life_wage, life_medexp,app_age,tn_seed)
 	!save the simulation results to .csv files
 	do j = 11,16 
@@ -741,8 +740,8 @@ subroutine valfun(cohort,wage,medexp,transmat,surv,ms,vf,vf_na,pf,pf_na,lchoice,
     return
 end subroutine valfun
 
-subroutine lc_simulation(cohort,in_asset,in_aime,years_aime,wage,logwage,wzmean,wzsd,mexp,logmexp,mzmean,mzsd, &
-						ms,transmat,vf,vf_na,pf,pf_na,lchoice,lchoice_na,app_policy, surv, &
+subroutine lc_simulation(cohort,in_asset,in_aime,years_aime,wage,logwage,wzmean,wzsd,wbinborders,mexp,logmexp,mzmean,mzsd, &
+						mbinborders,ms,transmat,vf,vf_na,pf,pf_na,lchoice,lchoice_na,app_policy, surv, &
 						life_assets,life_labor,life_earnings, life_wage, life_medexp,app_age,tn_seed)
 !this subroutine simulates the life cycle of an individual given:
 !-cohort
@@ -761,6 +760,7 @@ real (kind = 8), intent(in) :: in_asset, in_aime
 integer, intent(in) :: years_aime
 real (kind = 8), dimension(lifespan,nwagebins), intent(in) :: wage
 real (kind = 8), dimension(lifespan), intent(in) :: wzmean, wzsd,logwage
+real (kind = 8), intent(in) :: wbinborders(lifespan,nwagebins+1), mbinborders(lifespan,nmedbins+1)
 real (kind = 8), dimension(lifespan,nhealth,nmedbins), intent(in) :: mexp
 real (kind = 8), dimension(lifespan,nhealth), intent(in) :: mzmean, mzsd,logmexp
 integer, dimension(statesize,3), intent(in) :: ms
@@ -856,24 +856,22 @@ do t = 1,lifespan
 	h = int(ms(curstate,3))
 	!given the bin, make two draws from truncated normal for both wage and med exp
 	!First, draw wage residual
-	if (w /= 1 .AND. w /= nwagebins) then
-		call truncated_normal_ab_sample(wzmean(t),wzsd(t),wzmean(t)+wzsd(t)*(w-3.5), &
-										wzmean(t)+wzsd(t)*(w-2.5),tn_seed,wage_tn)
-	elseif (w == 1) then
-		!calculate lower bound of RESIDUAL; it must be negative here!
-		bound = log(wage(t,1)) - logwage(t)
-		call truncated_normal_ab_sample(wzmean(t),wzsd(t),bound, &
-										wzmean(t)-1.5*wzsd(t),tn_seed,wage_tn)
-	elseif (w == nwagebins) then
-		!calculate upper bound of RESIDUAL; it must be positive here!
-		bound = log(wage(t,nwagebins)) - logwage(t)
-		call truncated_normal_ab_sample(wzmean(t),wzsd(t),wzmean(t)+1.5*wzsd(t), &
-										bound,tn_seed,wage_tn)
+	if (w /= 1 .AND. w /= nwagebins) then !not first and not last bin
+		call truncated_normal_ab_sample(wzmean(t),wzsd(t),wbinborders(t,w), &
+										wbinborders(t,w+1),tn_seed,wage_tn)
+	elseif (w == 1) then !first bin
+		call truncated_normal_ab_sample(wzmean(t),wzsd(t),wage(t,1), &
+										wbinborders(t,2),tn_seed,wage_tn)
+	elseif (w == nwagebins) then !last bin
+		call truncated_normal_ab_sample(wzmean(t),wzsd(t),wbinborders(t,nwagebins-1), &
+										wage(t,nwagebins),tn_seed,wage_tn)
 	else
 		print *, "Something's wrong with current wage state"
 		read (*,*)
 		stop
 	endif
+	
+	
 	! Calculate wage
 	wcur = exp(logwage(t)+wage_tn)
 	
@@ -890,18 +888,14 @@ do t = 1,lifespan
 	endif
 	! Second draw med exp residuals
 	if (m /= 1 .AND. m /= nmedbins) then
-		call truncated_normal_ab_sample(mzmean(t,h),mzsd(t,h),mzmean(t,h)+mzsd(t,h)*(m-3.5), &
-										mzmean(t,h)+mzsd(t,h)*(m-2.5),tn_seed,med_tn)
+		call truncated_normal_ab_sample(mzmean(t,h),mzsd(t,h),mbinborders(t,m), &
+										mbinborders(t,m+1),tn_seed,med_tn)
 	elseif (m == 1) then
-		!lower bound
-		bound = log(mexp(t,h,1)) - logmexp(t,h)
-		call truncated_normal_ab_sample(mzmean(t,h),mzsd(t,h), bound, &
-										mzmean(t,h)-1.5*mzsd(t,h),tn_seed,med_tn)
+		call truncated_normal_ab_sample(mzmean(t,h),mzsd(t,h), mexp(t,h,1), &
+										mbinborders(t,2),tn_seed,med_tn)
 	elseif (m == nmedbins) then
-		!upper bound
-		bound = log(mexp(t,h,nmedbins)) - logmexp(t,h)
-		call truncated_normal_ab_sample(mzmean(t,h),mzsd(t,h),mzmean(t,h)+1.5*mzsd(t,h), &
-										bound,tn_seed,med_tn)
+		call truncated_normal_ab_sample(mzmean(t,h),mzsd(t,h),mbinborders(t,nmedbins-1), &
+										mexp(t,h,nmedbins),tn_seed,med_tn)
 	else
 		print *, "Something's wrong with current med exp state"
 		read (*,*)
