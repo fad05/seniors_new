@@ -211,7 +211,7 @@ do i = 1,ntypes
 	wzsd(:,i) = logwagedata(:,3,i)
 	!construct a wage grid: 
 	!values of wage on the borders of bins
-	do k = 1,nwagebins+1
+	do k = 1,nwagebins
 		do t = 1,lifespan
 			call truncated_normal_ab_mean (wzmean(t,i), wzsd(t,i), wbinborders(t,k), wbinborders(t,k+1), bin_mean)
 			wagegrid(t,k,i) = exp(logwage(t,i)	+	bin_mean)
@@ -226,7 +226,7 @@ do i = 1,ntypes
 		logmexp(:,j,i) = logmexpdata(:,1,j,i)
 		mzmean(:,j,i) = logmexpdata(:,2,j,i)
 		mzsd(:,j,i) = logmexpdata(:,3,j,i)
-		do k = 1,nmedbins+1
+		do k = 1,nmedbins
 			do t = 1,lifespan
 				call truncated_normal_ab_mean (mzmean(t,j,i), mzsd(t,j,i), mbinborders(t,k), mbinborders(t,k+1), bin_mean)
 				mexpgrid(t,j,k,i) = exp(logmexp(t,j,i)	+	bin_mean)
@@ -325,6 +325,9 @@ open(unit=16,file='data_output/app_age.txt',status='replace')
 
 do i = 1,nsim !simulate "nsim" individuals of given type
 	!draw initial log aime and log assets from bivariate normal
+!	if (i == 10) then
+!		read (*,*)
+!	endif
 	
 	call random_number(rndnum)
 	if (rndnum > prob_a0) then !draw from bivariate with nonzero assets
@@ -640,6 +643,9 @@ subroutine valfun(cohort,wage,medexp,transmat,surv,ms,vf,vf_na,pf,pf_na,lchoice,
 !	AIME' = (AIME+wl)/35 if individual worked less; for now i assume that at age 62 everybody worked at least 35 years). We calculate both these scenarios (the "application" 
 !	scenario is already calculated in the first vf), and choose the one that grants higher utility (setting ss policy to 0 or 1 accordingly), and thus second VF ths period is calculated.  
 	
+	vf_na = -103.0d0
+    pf_na = -104.0d0
+	
 	vf_na(:,:,:,lifespan:lifespan+1,1) = vf(:,:,:,lifespan:lifespan+1) !upon death and in the last period, the two value functions are identical (everyone applies at age 90 with certainty)
 	vf_na(:,:,:,lifespan:lifespan+1,2) = vf(:,:,:,lifespan:lifespan+1)
 	app_policy = 0 !initialize application policy
@@ -781,7 +787,8 @@ integer, intent(inout) :: tn_seed
 
 !LOCAL VARIABLES
 real (kind = 8) anext, workyears, aime, apx, lpx, acur, wcur, mcur, bcur, vx1,vx2
-real (kind = 8) wage_tn, med_tn !wage and medical expenses drawn from truncated normal
+real (kind = 8) wage_tn, med_tn !wage and medical expenses residiual drawn from truncated normal
+real (kind = 8) bin_mean !technical variable to store mean of given bin of residuals
 integer iaprev, ianext, ibprev, ibnext
 integer iwprev,iwnext,imprev,imnext !indices of previous and next gridpoints in (w,m) - space
 
@@ -860,11 +867,14 @@ do t = 1,lifespan
 		call truncated_normal_ab_sample(wzmean(t),wzsd(t),wbinborders(t,w), &
 										wbinborders(t,w+1),tn_seed,wage_tn)
 	elseif (w == 1) then !first bin
-		call truncated_normal_ab_sample(wzmean(t),wzsd(t),wage(t,1), &
+		call truncated_normal_ab_mean (wzmean(t), wzsd(t), wbinborders(t,1), wbinborders(t,2), bin_mean) !calculate mean of the first bin
+		call truncated_normal_ab_sample(wzmean(t),wzsd(t),bin_mean, & 		!draw residal from mean of the first bin to edge of the first bin 
 										wbinborders(t,2),tn_seed,wage_tn)
 	elseif (w == nwagebins) then !last bin
-		call truncated_normal_ab_sample(wzmean(t),wzsd(t),wbinborders(t,nwagebins-1), &
-										wage(t,nwagebins),tn_seed,wage_tn)
+		call truncated_normal_ab_mean (wzmean(t), wzsd(t), wbinborders(t,nwagebins), &
+		 wbinborders(t,nwagebins+1), bin_mean) !calculate mean of the last bin
+		call truncated_normal_ab_sample(wzmean(t),wzsd(t),wbinborders(t,nwagebins), &
+										bin_mean,tn_seed,wage_tn)
 	else
 		print *, "Something's wrong with current wage state"
 		read (*,*)
@@ -891,11 +901,14 @@ do t = 1,lifespan
 		call truncated_normal_ab_sample(mzmean(t,h),mzsd(t,h),mbinborders(t,m), &
 										mbinborders(t,m+1),tn_seed,med_tn)
 	elseif (m == 1) then
-		call truncated_normal_ab_sample(mzmean(t,h),mzsd(t,h), mexp(t,h,1), &
+		call truncated_normal_ab_mean 	(mzmean(t,h), 	mzsd(t,h), mbinborders(t,1), mbinborders(t,2), bin_mean) !calculate mean of the first bin
+		call truncated_normal_ab_sample	(mzmean(t,h),	mzsd(t,h), bin_mean, &
 										mbinborders(t,2),tn_seed,med_tn)
 	elseif (m == nmedbins) then
-		call truncated_normal_ab_sample(mzmean(t,h),mzsd(t,h),mbinborders(t,nmedbins-1), &
-										mexp(t,h,nmedbins),tn_seed,med_tn)
+		call truncated_normal_ab_mean 	(mzmean(t,h), 	mzsd(t,h),	mbinborders(t,nmedbins), &
+		 mbinborders(t,nmedbins+1), bin_mean) !calculate mean of the last bin
+		call truncated_normal_ab_sample	(mzmean(t,h),	mzsd(t,h),	mbinborders(t,nmedbins), &
+										bin_mean,tn_seed,med_tn)
 	else
 		print *, "Something's wrong with current med exp state"
 		read (*,*)

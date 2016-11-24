@@ -447,4 +447,8 @@ enddo
 
 end subroutine cumsum
 
+!subroutine earnings_test(benefit, income, withheld_b)
+
+!end subroutine earnings_test
+
 end module procedures

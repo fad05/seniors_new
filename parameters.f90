@@ -40,6 +40,6 @@ module parameters
     
     !Earning test exempt amounts
     real (kind = 8), parameter :: et_2005 = 12000 !exempt amount of young cohort: 62-66
-    real (kind = 8), parameter :: et_1994 = (/10593,14704/) !two exempt amounts for old cohort: 62-65 and 66-70 years of age
+    real (kind = 8), parameter :: et_1994(2) = (/10593,14704/) !two exempt amounts for old cohort: 62-65 and 66-70 years of age
      save
 end module parameters

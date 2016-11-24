@@ -156,100 +156,11 @@ subroutine labchoice (lchoice, cons, util, acur,anext, h, wage, mexp,ss)
 !		cons = cons*scale_factor
 !		util = util*scale_factor**(1-sigma)
 		
-	
-		
-!	    !Look for maximum utility on the interval (0,lmax] using grid maximum as starting point    
-!		10  lc(1) = lguess 
-		
-!	    call lmdif1(lc_minpack, 1, 1, lc, fvec,tol, info) !find optimal labor choice
-!	    uchoice = -fvec(1) !utility equals negative of the outcome of the procedure
-!	    !print *, uchoice
-!	    if (info>=1 .AND. info<=3 .AND. lc(1)>=0.0d0 .AND. lc(1) <= lmax) then !optimal solution is found and it is within feasible range
-!			print *, info
-!	        lchoice = lc(1)
-!	        utemp = uchoice
-!	        call cons_util_calc(lchoice, wage, acur_scaled, anext_scaled, mexp_scaled, cons, util)  
-!	        if (real(utemp) .NE. real(util)) then
-!				print *, 'U outcome of minimzer:', real(utemp)
-!				print *, 'U calculated with optimal labor:', real(util)
-!				print *, 'Utility outcome of minimizer not equal to utility calculated with optimal labor! Press any button:'
-!				read (*,*)				
-!	        endif   
-!	        counter = 0 !Nullify counter
-!	    elseif (info>=1 .AND. info<=3 .AND. lc(1)<0.0d0) then !optimal solution found and it's negative: something's wrong with the code
-!	        print *, info
-!	        print *, 'Negative hours! Check the code!'
-!	        print *, char(7) !beep
-!	        call sleep(120)
-!	    elseif (info>=1 .AND. info<=3 .AND. lc(1)>lmax) then !optimal solution found and it's outside the range; set it to 
-!			print *, info
-!			print *, 'Hours too large! Check the code!'
-!			print *, char(7) !beep
-!			call sleep(120)
-!		elseif (info >= 4) then
-!			counter = counter+1
-!			lguess = lguess + max((-1)**counter*(counter*100/scale_factor),0) !update initial guess
-!			print *, info
-!			if ((counter > 10 .AND. labgrid_max >0) .OR. (counter > 3 .AND. labgrid_max == 0)) then !if maximum utility is at zero labor, we only repeat search 3 times; if max utility on the grid achieved NOT in zero labor, we search 10 times with different initial guesses 
-!				lchoice = labgrid_max !in this case, pick labor that corresponds to a maximum on the grid
-!				if (lchoice /= 0.0d0) then
-!					print *,  'Nonzero labor on the grid is chosen, somethings''s wrong:', lchoice
-!					call sleep(120)
-!				else !ZERO labor, no KAPPA in utility
-!					print *, 'Zero labor is chosen from the grid!'
-!					!call sleep(3)
-!					call cons_util_calc(0.0d0,wage,acur_scaled, anext_scaled, mexp_scaled,cons,util)
-!				endif
-!				counter = 0 !Nullify counter
-!			else
-!				goto 10 !make a new search attempt with different guess
-!			endif
-!	    else 
-!			print *, 'Hell knows what''s going on!'
-!			print *, char(7) !beep
-!	        call sleep(120)
-!	    endif
 	endif ! END IF maximum achieved not on the first value of the grid
 
     return !end of subroutine
-    !function that allows to use minpack
+
     contains
-!        subroutine lc_minpack( m, n, x, fvec1, iflag )
-!            integer ( kind = 4 ) n, m
-!            real (kind = 8) fvec1(m)
-!            integer ( kind = 4 ) iflag
-!            real (kind = 8)  x(n)
-
-!            !internal variables
-!            real (kind = 8) lab, cl, ul
-
-!            !body
-!            lab = x(n)
-!            if (lab<0) then
-!				print *, 'Input labor is negative! Push any button to proceed.'
-!				read (*,*)
-!				lab = 1.0d-6
-!			endif 
-!			!if (lab < 0) then
-!			!	lab = 0 !no negative hours are feasible
-!			!endif
-			
-!			if (lab > lmax) then !choice is infeasible
-!				fvec(1) = 1.0d5 !large POSITIVE utility, since we're minimizing; we can't afford violation of this constraint; thus it's never optimal to choose this amount of hours
-!			else !lab is between zero and lmax, thus we just calculate consumption and utility
-!				call cons_util_calc(lab, wage, acur_scaled, anext_scaled, mexp_scaled, ss_scaled,cl, ul)
-!				fvec(1) = -ul ! we're minimizing, so in order to find maximum, we need negative of utility function
-!			endif
-!			x(n) = lab
-!			if (isnan(x(n)) .OR. isnan(fvec(1))) then
-!				print *, x(n) 
-!				print *, fvec(1)
-!				print *, 'NAN. Press any button:'
-!				read (*,*)
-!			endif
-!			!print *, x(n)
-!			!print *, fvec(1)
-!        end subroutine lc_minpack
         
         subroutine cons_util_calc(lbr, wg, acrnt, anxt, mxp, ssec, cns, utl)
 			real (kind = 8), intent(in) :: lbr, wg, acrnt, anxt, mxp, ssec
