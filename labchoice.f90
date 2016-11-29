@@ -1,9 +1,9 @@
-subroutine labchoice (lchoice, cons, util, acur,anext, h, wage, mexp,ss)
+subroutine labchoice (lchoice, cons, util, acur,anext, h, wage, mexp,ss,age,cohort)
 	use procedures
     use parameters
     implicit none
     real (kind = 8), intent(in) :: acur, anext, wage,mexp,ss !current assets, next period assets, current wage, mexp, social scurity
-    integer, intent(in) :: h !health status, 1 or 2
+    integer, intent(in) :: h, age, cohort !health status, age and cohort
     real (kind = 8), intent(out) :: lchoice !optimal labor choice
     real (kind = 8), intent(out) :: cons !consumption under optimal choice
     real (kind = 8), intent(out) :: util !value of utility under optimal choice
@@ -165,7 +165,7 @@ subroutine labchoice (lchoice, cons, util, acur,anext, h, wage, mexp,ss)
         subroutine cons_util_calc(lbr, wg, acrnt, anxt, mxp, ssec, cns, utl)
 			real (kind = 8), intent(in) :: lbr, wg, acrnt, anxt, mxp, ssec
 			real (kind = 8), intent(out) :: cns, utl
-			real (kind = 8) taxes, income, taxable_income
+			real (kind = 8) taxes, income, taxable_income, earnings, withheld_b, ssec_received, bnext
 		
 		
 			!BODY
@@ -175,11 +175,22 @@ subroutine labchoice (lchoice, cons, util, acur,anext, h, wage, mexp,ss)
 			!2. anext > 0; if here consumption is lower than cmin, the case is not valid: agend sacrifices consumption for savings. If in this case consumption is lover than cmin, agent is not compensated;
 			!if consumption is negative, the utility is set to large negative number, in order never to be optimal.
 			!Another fork is whether labor is zero or not. If it is, there is no utility penalty, expressed as KAPPA.
-			income = r*acrnt + lbr*wg !asset return + labor income
-			taxable_income = taxable_amount(income*scale_factor, ssec*scale_factor)
+			
+			
+			!**** EARNINGS TEST PT.1
+			!I have to check the earnings test
+			earnings = lbr*wg !earnings
+			call earnings_test(cohort,age,ssec*scale_factor, earnings*scale_factor, withheld_b, bnext) !calculate withheld amount
+			withheld_b = withheld_b/scale_factor 	!scale withheld amount
+			ssec_received = ssec - withheld_b 		!calculate actually received socsec benefit
+			!**** EARNINGS TEST PT.1
+			!The further implementation of earnings test is inside "valfun" routine
+			
+			income = r*acrnt + earnings !asset return + labor income
+			taxable_income = taxable_amount(income*scale_factor, ssec_received*scale_factor)
 			taxes = income_tax(taxable_income)/scale_factor
 			
-			cns = (1+r)*acrnt + lbr*wg +ssec- anxt - mxp - taxes !uncompensated consumption; in the case when lbr==0, labor income is ZERO
+			cns = (1+r)*acrnt + lbr*wg +ssec_received- anxt - mxp - taxes !uncompensated consumption; in the case when lbr==0, labor income is ZERO
 			if (lbr == 0) then !labor is zero
 				if (anxt == 0) then !next-period assets are zero: agent is eligible for minimal consulption level					
 					if (cns > cmin_scaled) then !consumption is hgher than minimal, no transfers

@@ -28,12 +28,12 @@ subroutine valfun(cohort,wage,medexp,transmat,surv,ms,vf,vf_na,pf,pf_na,lchoice,
 	real (kind = 8), dimension(grid_asset,statesize,grid_ss,lifespan,2), intent(out) :: app_policy
 	real (kind = 8), dimension(grid_asset,statesize,grid_ss,lifespan,2), intent(out) :: lchoice_na
 end subroutine valfun
-subroutine labchoice (lchoice, cons, util, acur,anext, h, wage, mexp)
+subroutine labchoice (lchoice, cons, util, acur,anext, h, wage, mexp,ss,age,cohort)
+	use procedures
     use parameters
-    use procedures
     implicit none
-    real (kind = 8), intent(in) :: acur, anext, wage,mexp !current assets, next period assets, current wage, mexp
-    integer, intent(in) :: h !health status, 1 or 2
+    real (kind = 8), intent(in) :: acur, anext, wage,mexp,ss !current assets, next period assets, current wage, mexp, social scurity
+    integer, intent(in) :: h, age, cohort !health status, age and cohort
     real (kind = 8), intent(out) :: lchoice !optimal labor choice
     real (kind = 8), intent(out) :: cons !consumption under optimal choice
     real (kind = 8), intent(out) :: util !value of utility under optimal choice
@@ -409,9 +409,9 @@ subroutine valfun(cohort,wage,medexp,transmat,surv,ms,vf,vf_na,pf,pf_na,lchoice,
     integer i,j,k,l,t,s,w,m,h, age, st, bcalc
     real (kind = 8) b, bnext, aime, aime_next !variables to contain current value of ss (on the grid) and next period (calculated by formula), as well as AIMEs
     integer ibprev, ibnext !indices of the interval points on ss grid within which lies calculated next-period benefit 
-    real (kind = 8) vf_na_interp(statesize) !container for interpolated value function
+    real (kind = 8) vf_na_interp(statesize), vf_interp(statesize) !containers for interpolated value function
     real (kind = 8) val_max_na(grid_asset) !technical variable, maxed vf_na BEFORE comparison vith vf
-    
+    real (kind = 8) withheld_b, bnext_erntest    
 
 !BODY OF VALFUN
 !1. Check input and output matrices' dimensions
@@ -593,13 +593,37 @@ subroutine valfun(cohort,wage,medexp,transmat,surv,ms,vf,vf_na,pf,pf_na,lchoice,
 	            do j = 1,grid_asset     !next-period assets
 	                do i = 1,grid_asset !current assets
 	                    !First, calculate optimal labor choice
-!	                    if (age == 65 .AND. k == 4 .AND. i == 5 .AND. w == 2) then
+!	                    if (age == 65 .AND. k == grid_ss .AND. i == 5 .AND. w == 2) then
 !							print *, 'stop'
 !						endif
-						call labchoice(opt_labor, cons, util, assets(i),assets(j),h,wage(t,w),medexp(t,h,m),ss(k))
+						call labchoice(opt_labor, cons, util, assets(i),assets(j),h,wage(t,w),medexp(t,h,m),ss(k),age,cohort)
 	                    lab_cur_next(i,j) = opt_labor
 	                    !print *, opt_labor
-
+	                    
+	                    !**** EARNINGS TEST PT.2
+	                    !First part is inside "labchoice" routine
+						!calculate the updated benefit level for the next period
+	                    call earnings_test(cohort,age,ss(k), opt_labor*wage(t,w), withheld_b,bnext_erntest)
+	                    
+	                    if (k == grid_ss) then !highest possible benefits
+							bnext_erntest = ss(grid_ss) !in the unlikely event that individual benefits are already on the highest level, one can't get more 
+						endif
+	                    !**** EARNINGS TEST PT.2
+	                    
+	                    if (bnext_erntest > ss(k+1) .AND. k /= grid_ss) then
+							print *, 'bnext_erntest is too large! Press any button to proceed:'
+							read (*,*)							
+						endif
+	                    !if updated benefit differs from current one 
+	                    if (bnext_erntest > ss(k)) then 
+	                    !we know it can't be above ss(k+1)
+							!Calculate set of interpolations for next-period vf given next-period: one interpolation for every state s
+							do st = 1,statesize
+								vf_interp(st) = linproj(bnext_erntest,ss(k),ss(k+1),vf(j,st,k,t+1),vf(j,st,k+1,t+1)) !vf(j - next period asset, st - next-period state;k,k+1.. - indices of ss, t+1 - next period)
+							enddo
+		                else !no need to interpolate
+							vf_interp = vf(j,:,k,t+1)
+						endif
 	                    !unmaxed "value function"
 	                    val_nomax(i,j) = util + beta*(surv(t,h)*dot_product(vf(j,:,k,t+1),transmat(s,:,t)) &
 	                                + (1-surv(t,h))*beq(j))
@@ -666,13 +690,16 @@ subroutine valfun(cohort,wage,medexp,transmat,surv,ms,vf,vf_na,pf,pf_na,lchoice,
 		            do j = 1,grid_asset     !next-period assets
 						do i = 1,grid_asset !current assets
 							!First, calculate optimal labor choice WITH 0 social security: "what if I don't apply?"
-							call labchoice(opt_labor, cons, util, assets(i),assets(j),h,wage(t,w),medexp(t,h,m),0.0d0)
+							call labchoice(opt_labor, cons, util, assets(i),assets(j),h,wage(t,w),medexp(t,h,m),0.0d0,age,cohort)
 		                    lab_cur_next_na(i,j) = opt_labor
 		                    
 		                    !NOW, HERE ARE THE BIG DIFFERENCES BETWEEN THIS VF AND THE FIRST ONE
 		                    !First, we calculate next-period B (it's going to be off the grid), and use linear interpolation to calculate
 		                    !value functions between points of B. Then we have to take expectation of these interpolations.
 		                    !On top of that, we need to control for application age: an individual can't apply if she's younger than 62
+		                    if (k == grid_ss) then
+								print *, 'checkpoint'
+		                    endif
 		                    
 		                    !current benefit, in monetary terms
 		                    b = ss(k) 

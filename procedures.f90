@@ -397,13 +397,16 @@ real (kind = 8), dimension(:,:), intent(in) :: transmat
 real (kind = 8), dimension(:), intent(out) :: statvec
 
 integer n,m,k !dimensions of the input
-real (kind = 8) :: eps=1.0d-6, deltasum = 1.0d0
+real (kind = 8)	 eps, deltasum
 real (kind = 8), dimension(:), allocatable :: statvec_upd
 
 	n = size(transmat,1)
 	m = size(transmat,2)
 	k = size(statvec)
-
+	
+	eps=1.0d-6
+	deltasum = 1.0d0
+	
 	if (n /= m) then
 		print *, "Input matrix is not square!"
 		read (*,*)
@@ -447,8 +450,47 @@ enddo
 
 end subroutine cumsum
 
-!subroutine earnings_test(benefit, income, withheld_b)
+subroutine earnings_test(cohort,age,benefit, earnings, withheld_b,benefit_next)
+use parameters
+integer, intent(in)				::	cohort, age
+real (kind = 8), intent(in)		::	benefit, earnings
+real (kind = 8), intent(out)	::	withheld_b, benefit_next
+!The procedre will calculate the amount to be withheld by earnings test 
+!and calculates adjusted next period benefit.
 
-!end subroutine earnings_test
+if (cohort == 1) then				!older cohort
+	if (earnings > et_1994(1) .AND. age<65) then
+		withheld_b = min(benefit,0.5*(earnings-et_1994(1)))
+		benefit_next = benefit*(1+withheld_b*penalty_er3/benefit) !increased future benefit proportionally to withheld part
+	elseif (earnings > et_1994(2) .AND. age>=65 .AND. age<70) then
+		withheld_b = min(benefit,(earnings-et_1994(2))/3)
+		benefit_next = benefit*(1+withheld_b*credit_delret(cohort)/benefit) 
+	else				!earnings are small or older than 70
+		withheld_b = 0
+		benefit_next = benefit
+	endif
+elseif (cohort == 2) then			!younger cohort
+	if (earnings <= et_2005 .OR. age >= nra(2)) then 	!earnings are small or older than NRA
+		withheld_b = 0
+		benefit_next = benefit
+	else							!earnings are large AND age is less than NRA
+		withheld_b = min(benefit,0.5*(earnings-et_2005))
+		if (nra(2)-age>3) then
+			benefit_next = benefit*(1+withheld_b*penalty_long/benefit)
+		elseif (nra(2) - age <= 3) then
+			benefit_next = benefit*(1+withheld_b*penalty_er3/benefit)
+		else
+			print *, 'Wrong age for benefits! Check "earnings_test" subroutine!  Push any button to proceed:'
+			read (*,*)
+		endif
+	endif
+else 
+	print *, 'Wrong cohort identifier! Press any button.'
+	read (*,*)
+	stop
+endif
+
+end subroutine earnings_test
+
 
 end module procedures
