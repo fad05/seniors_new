@@ -38,13 +38,14 @@ subroutine labchoice (lchoice, cons, util, acur,anext, h, wage, mexp,ss,age,coho
     real (kind = 8), intent(out) :: cons !consumption under optimal choice
     real (kind = 8), intent(out) :: util !value of utility under optimal choice
 end subroutine labchoice
-subroutine lc_simulation(cohort,in_asset,in_aime,years_aime,wage,logwage,wzmean,wzsd,wbinborders,mexp,logmexp,mzmean,mzsd, &
+subroutine lc_simulation(cohort,in_asset,in_aime,in_wage,in_mexp,in_health,years_aime, &
+						wage,logwage,wzmean,wzsd,wbinborders,mexp,logmexp,mzmean,mzsd, &
 						mbinborders,ms,transmat,vf,vf_na,pf,pf_na,lchoice,lchoice_na,app_policy, surv, &
 						life_assets,life_labor,life_earnings, life_wage, life_medexp,app_age,tn_seed)
 	use parameters
 	use procedures
-	integer, intent(in) :: cohort
-	real (kind = 8), intent(in) :: in_asset, in_aime
+	integer, intent(in) :: cohort, in_health
+	real (kind = 8), intent(in) :: in_asset, in_aime,in_wage,in_mexp
 	integer, intent(in) :: years_aime
 	real (kind = 8), dimension(lifespan,nwagebins), intent(in) :: wage
 	real (kind = 8), dimension(lifespan), intent(in) :: wzmean, wzsd,logwage
@@ -122,15 +123,14 @@ real (kind = 8), dimension(lifespan) :: life_labor, life_earnings, life_wage, li
 integer app_age
 	
 	
-integer i,j,k,l,t,w,wn,m,mn,h,hn,ind_type
+integer i,j,k,l,t,w,wn,m,mn,h,hn,ind_type, ind_subtype, counter
 integer :: cohort, sex, college, health, age(lifespan) = (/(i,i=50,90)/)
 integer ms(statesize,3)
 
 !variables necessary to use "random" module;
 !to draw from bivariate normal
-real mu_vec(2), var_vec(4) !vector of means and variance-covariance matrix for bivariate normal draws
-real f_chol(4) !LOWER TRIANGULAR DECOMPOSITION OF VARIANCE MATRIX
-real bivarn_draw(2) !a draw from bivariate normal
+real fchol3(9), fchol4(16) !LOWER TRIANGULAR DECOMPOSITION OF VARIANCE MATRIX, 3-dim and 4-dim
+real draw3(3), draw4(4) !a draw from mv normal
 integer ier !    ier = 1 if the input covariance matrix is not +ve definite
 !    FIRST = .TRUE. IF THIS IS THE FIRST CALL OF THE ROUTINE
 !    OR IF THE DISTRIBUTION HAS CHANGED SINCE THE LAST CALL OF THE ROUTINE.
@@ -144,8 +144,13 @@ integer seed_size
 integer, allocatable :: seed(:)
 real (kind = 8) rndnum
 
-real (kind = 8) :: in_aime, in_asset ! initial values of aime and assets drawn from distribution
+real (kind = 8) :: 	in_aime, in_asset, in_wage, in_mexp ! initial values of aime, assets, wage and mexp drawn from distribution
+integer				in_health
 
+!variables that contain parameters of joint distributions of AIME, assets, wage and medical expenses (conditional on asses being zero)
+real (kind = 8) prob_ah(4,4), cdf_ah(4,4) 		!4 = male/femele * college/noncollege; 4 = a0h0/a0h1/a1h0/a1h1
+real (kind = 8) joint_awma0(4,9) 				!4 = male/femele * college/noncollege; 9 = mu_a, mu_w, mu_m + varcov mat (6 values)
+real (kind = 8) joint_awma(4,14)				!4 = male/femele * college/noncollege; 14 = mu_a, mu_w, mu_m, mu_assets + varcov mat (10 values)
 
 !PROGRAM BODY
 
@@ -187,13 +192,47 @@ do cohort = 0,1
     enddo
 enddo
 
+!1.1.4. Initial joint distribution of young cohort at age 50 of AIME, assets, wage and medical expenses; joint probabilities of bad health and zero assets
+!		Every imported matrix has four rows, which denote: 	
+!					1 row: male 0, college 0
+!					2 row: male 0, college 1
+!					3 row: male 1, college 0
+!					4 row: male 1, college 1
+
+!1.1.4.1. 	Joint probabilities of having good/bad health and zero/nonzero assets
+!			4 columns, denote following:
+!			1: Pr(assets = 0, health = 0)
+!			2: Pr(assets = 0, health = 1)
+!			3: Pr(assets = 1, health = 0)
+!			4: Pr(assets = 1, health = 1)
+!	Rows are described above.
+					
+datafile = 'data_inputs/joint_assets_health.csv'
+call import_data(datafile,prob_ah)
+!			Calculate CDF and store in cdf_ah
+!			We'll need it during simulation cycle
+do i = 1,4
+	call cumsum(prob_ah(i,:), cdf_ah(i,:))
+enddo
+!1.1.4.2. Means and varcov matrix of joint lognormal distribution of mexp, aime and wage, assets == 0
+!			9 columns, denote following:
+!mu(logaime) mu(logwage) mu(logmexp) Var(logaime) Cov(logaime,logwage)	Var(logwage) Cov(logaime,logmexp) Cov(logwage,logmexp)	Var(logmexp)
+!	Rows are described above.
+
+datafile = 'data_inputs/joint_amw_zeroas.csv'
+call import_data(datafile,joint_awma0)
+
+!1.1.4.3. Means and varcov matrix of joint lognormal distribution of mexp, aime and wage and assets when assets > 0
+!			14 columns, denote following:
+!mu(laime) mu(lwage) mu(lmexp) mu(las) Var(laime) Cov(laime,lwage) Var(lwage) Cov(laime,lmexp) Cov(lwage,lmexp)	Var(lmexp) Cov(las,laime) Cov(las,lwage) Cov(las,lmexp) Var(las)
+!	Rows are described above.
+
+datafile = 'data_inputs/joint_aamw_nzeroas.csv'
+call import_data(datafile,joint_awma)
+
 !2.	Construct wage and medical expenses grids
 !Import a wage profile, profile of sd and mean of parenting normal distribution (which we are going to use to draw a wage)
 !		And med exp profile, profile of sd and mean of parenting normal distribution (which we are going to use to draw a med exp), additionally conditional on health
-
-!!!! IMPROVE HERE
-! 1. Import matrices of bin borders
-! 2. Recalculate grid points
 
 !1. Matrices of bin borders
 WRITE(datafile,'(a,i1,a)') "data_inputs/wagebin_borders_smooth.csv"
@@ -294,6 +333,12 @@ print *, "8. 1	1	1"
 
 read (*,*) ind_type
 print *, "Chosen type:", ind_type
+if (ind_type < 5) then
+	ind_subtype = 	ind_type
+else
+	ind_subtype	=	ind_type-4
+endif
+
 cohort = (ind_type-1)/4 + 1 !cohort is 1/2 and not 0/1 because of indexing style; it is passed to valfun, where it is passed to aime_calc and benefit_calc
 !sex = mod(ind_type,2)
 !Calculate stationary distribution of states at age 50 for that type
@@ -323,34 +368,54 @@ open(unit=14,file='data_output/life_wage.txt',status='replace')
 open(unit=15,file='data_output/life_medexp.txt',status='replace')
 open(unit=16,file='data_output/app_age.txt',status='replace')
 
+counter = 0
+
 do i = 1,nsim !simulate "nsim" individuals of given type
-	!draw initial log aime and log assets from bivariate normal
-!	if (i == 10) then
-!		read (*,*)
-!	endif
+	!First, make a draw to define jointly health status AND presence of assets
+	!Once the state is clear, make proper random draw from corresponding distribution (multivariate lognormal)
 	
 	call random_number(rndnum)
-	if (rndnum > prob_a0) then !draw from bivariate with nonzero assets
-		mu_vec = (/laime50_mu(cohort),las50_mu(cohort)/)
-		var_vec = (/laime50_sigma(cohort)**2,	laime50_sigma(cohort)*las50_sigma(cohort)*rho_laa(cohort), &
-					laime50_sigma(cohort)*las50_sigma(cohort)*rho_laa(cohort),	las50_sigma(cohort)**2/)
-		if (i == 1) then
+	if (rndnum <= cdf_ah(ind_subtype,2)) then 	!assets = 0, trivariate lognormal draw
+		counter = counter + 1
+		if (counter == 1) then
 			first = .TRUE.
 		else
 			first = .FALSE.
 		endif
-		call random_mvnorm(2, mu_vec, var_vec, f_chol, first, bivarn_draw, ier)
-		in_aime = real(exp(bivarn_draw(1)),8)
-		in_asset = real(exp(bivarn_draw(2)),8)
-	else	!draw from univariate with zero assets
-		in_aime = laime50_mu_a0 + random_normal()*laime50_sigma_a0
-		in_aime = exp(in_aime)
-		in_asset = 0.0d0
+		call random_mvnorm(3, 	real(joint_awma0(ind_subtype,1:3),4), &
+								real(joint_awma0(ind_subtype,4:9),4), fchol3, first, draw3, ier)
+		in_aime 	= real(exp(draw3(1)),8)
+		in_wage 	= real(exp(draw3(2)),8)
+		in_mexp 	= real(exp(draw3(3)),8)
+		in_asset	= 0.0d0
+		if (rndnum <= cdf_ah(ind_subtype,1)) then
+			in_health = 1 !bad health
+		else
+			in_health = 2 !good health
+		endif
+	else										!assets>0, quadrivariate lognormal draw
+		counter = counter + 1
+		if (counter == 1) then
+			first = .TRUE.
+		else
+			first = .FALSE.
+		endif
+		call random_mvnorm(4, 	real(joint_awma(ind_subtype,1:4),4), &
+								real(joint_awma(ind_subtype,5:14),4), fchol4, first, draw4, ier)
+		in_aime 	= real(exp(draw4(1)),8)
+		in_wage 	= real(exp(draw4(2)),8)
+		in_mexp 	= real(exp(draw4(3)),8)
+		in_asset	= real(exp(draw4(4)),8)
+		if (rndnum <= cdf_ah(ind_subtype,3)) then
+			in_health = 1 !bad health
+		else
+			in_health = 2 !good health
+		endif
 	endif
 !	if (i == 97) then
 !		read (*,*)
 !	endif
-	call lc_simulation(cohort,in_asset,in_aime,init_workyears, wagegrid(:,:,ind_type), &
+	call lc_simulation(cohort,in_asset,in_aime,in_wage,in_mexp,in_health, init_workyears, wagegrid(:,:,ind_type), &
 				logwage(:,ind_type),wzmean(:,ind_type),wzsd(:,ind_type), wbinborders, &
 				mexpgrid(:,:,:,ind_type),logmexp(:,:,ind_type),mzmean(:,:,ind_type),mzsd(:,:,ind_type), mbinborders, &
 				ms, transmat(:,:,:,ind_type),vf,vf_na,pf,pf_na,lchoice,lchoice_na,app_policy, surv(:,:,ind_type), &
@@ -773,7 +838,8 @@ subroutine valfun(cohort,wage,medexp,transmat,surv,ms,vf,vf_na,pf,pf_na,lchoice,
     return
 end subroutine valfun
 
-subroutine lc_simulation(cohort,in_asset,in_aime,years_aime,wage,logwage,wzmean,wzsd,wbinborders,mexp,logmexp,mzmean,mzsd, &
+subroutine lc_simulation(cohort,in_asset,in_aime,in_wage,in_mexp,in_health,years_aime, &
+						wage,logwage,wzmean,wzsd,wbinborders,mexp,logmexp,mzmean,mzsd, &
 						mbinborders,ms,transmat,vf,vf_na,pf,pf_na,lchoice,lchoice_na,app_policy, surv, &
 						life_assets,life_labor,life_earnings, life_wage, life_medexp,app_age,tn_seed)
 !this subroutine simulates the life cycle of an individual given:
@@ -788,8 +854,8 @@ subroutine lc_simulation(cohort,in_asset,in_aime,years_aime,wage,logwage,wzmean,
 use parameters
 use procedures
 implicit none
-integer, intent(in) :: cohort
-real (kind = 8), intent(in) :: in_asset, in_aime
+integer, intent(in) :: cohort, in_health
+real (kind = 8), intent(in) :: in_asset, in_aime,in_wage,in_mexp
 integer, intent(in) :: years_aime
 real (kind = 8), dimension(lifespan,nwagebins), intent(in) :: wage
 real (kind = 8), dimension(lifespan), intent(in) :: wzmean, wzsd,logwage
@@ -819,11 +885,16 @@ real (kind = 8) bin_mean !technical variable to store mean of given bin of resid
 integer iaprev, ianext, ibprev, ibnext
 integer iwprev,iwnext,imprev,imnext !indices of previous and next gridpoints in (w,m) - space
 
+!values of bin borders IN NUMBRS, NOT IN LOG DEVIATIONS (NOTE THE DIFFERENCE FROM WBINBORDERS); 
+!FIRST BIN NOT LIMITED FROM BELOW, UPPER BIN IS NOT LIMITED FRO ABOVE
+!ONLY PURPOSE OF THIS IS TO DETERMINE INITIAL STATE
+real (kind = 8) init_wage_bins(nwagebins-2), init_mexp_bins(nmedbins-2) 
+
 
 real (kind = 8) rndnum, statvec(statesize), cumstvec(statesize), cumtrans(statesize)
 real (kind = 8) assets(grid_asset), ss(grid_ss)
 real (kind = 8) bound !variable used to calculate truncation bound for truncated normal
-integer t, curstate, nextstate , bcalc, age
+integer t, curstate, nextstate , bcalc, age, i
 integer w,m,h !wage, med, health index
 integer death_age
 
@@ -862,15 +933,39 @@ call logspace(ss_min,ss_max,grid_ss-1,ss(2:grid_ss))
 
 
 !------------------------------------------
-!calculate initial stationry distribution of states at age 50 and determine initial state by random draw
-call stationary_dist(transmat(:,:,1),statvec)
-call cumsum(statvec,cumstvec)
-call random_number(rndnum) !get a random number from uniform (0,1) distribution
-nextstate = locate_greater(cumstvec,rndnum) !see where this number falls in cumulative current distribution
+!!calculate initial stationry distribution of states at age 50 and determine initial state by random draw
+!call stationary_dist(transmat(:,:,1),statvec)
+!call cumsum(statvec,cumstvec)
+!call random_number(rndnum) !get a random number from uniform (0,1) distribution
+!nextstate = locate_greater(cumstvec,rndnum) !see where this number falls in cumulative current distribution
 !------------------------------------------
 
+!determine current state, given initial health, wage and mexp
+	do i = 1,nwagebins-2
+		init_wage_bins(i) = exp(logwage(1)+wbinborders(t,i+1))
+	enddo
+	do i = 1,nmedbins-2
+		init_mexp_bins(i) = exp(logmexp(1,h)+mbinborders(t,i+1))
+	enddo
+	h = in_health
+
+	!determine wage and mexp bin
+	w = locate_greater(wage(1,:),in_wage)
+	m = locate_greater(mexp(1,h,:),in_mexp)
+	!determine last bins
+	if 		(w == 0) then
+		w = nwagebins
+	elseif 	(m == 0) then
+		m = nmedbins
+	endif
+	
+	nextstate = h+nhealth*(m-1)+nmedbins*nhealth*(w-1)
+!END determine current state,
+
+wcur = in_wage 	!input wage
+mcur = in_mexp	!input mexp
 acur = in_asset !input asset
-aime = in_aime !as well as starting AIME
+aime = in_aime 	!input aime
 workyears = years_aime !and years worked
 app_age = 1000 !we first set it to very high number, just for initialization
 
@@ -879,9 +974,32 @@ do t = 1,lifespan
 	age = t+49
 	curstate = nextstate !update state
 	
+	!put current values into personal history
+	life_assets(t) 	= acur
+	life_wage(t) 	= wcur
+	life_medexp(t) 	= mcur
+	
+	!now, we need to update state, using transition matrix
+	call cumsum(transmat(curstate,:,t),cumtrans)
+	call random_number(rndnum)
+	nextstate = locate_greater(cumtrans,rndnum)
+	
+	!Check if an individual survives to the next period
+	call random_number(rndnum)
+	if (rndnum > surv(t,h)) then !a person is dead
+		life_assets(t+2:lifespan+1) = -1
+		life_labor(t+1:lifespan) 	= -1
+		life_wage(t+1:lifespan) 	= -1
+		life_earnings(t+1:lifespan) = -1
+		life_medexp(t+1:lifespan) 	= -1
+		if (app_age>age) then !individual didn't apply for the benefits
+			app_age = -1
+		endif
+		
+		exit !exit DO loop
+	endif
+	
 	!	A) ASSETS HISTORY UPDATE
-	!put current asset into personal history
-	life_assets(t) = acur
 	
 	!determine wage shock and med shock corresponding to the current state; we're going to need it for AIME update
 	!that is, which bin we're at now for wage and for med exp
@@ -913,16 +1031,9 @@ do t = 1,lifespan
 	wcur = exp(logwage(t)+wage_tn)
 	
 	!	B) WAGE HISTORY UPDATE
-	life_wage(t) = wcur
 	
-	! Find nearest wage grid points
-	if (life_wage(t)>=wage(t,w)) then
-		iwprev = w
-		iwnext = w + 1
-	else
-		iwprev = w - 1
-		iwnext = w
-	endif
+	
+
 	! Second draw med exp residuals
 	if (m /= 1 .AND. m /= nmedbins) then
 		call truncated_normal_ab_sample(mzmean(t,h),mzsd(t,h),mbinborders(t,m), &
@@ -945,7 +1056,6 @@ do t = 1,lifespan
 	mcur = exp(logmexp(t,h)+med_tn)
 	
 	!	C) MEDICAL EXPENSES HISTORY UPDATE
-	life_medexp(t) = mcur
 	
 	! Nearest med grid points
 	if (life_medexp(t)>=mexp(t,h,m)) then
@@ -1187,25 +1297,6 @@ do t = 1,lifespan
 	life_earnings(t) = 	wcur*life_labor(t)
 	
 	
-	!now, we need to update state, using transition matrix
-	call cumsum(transmat(curstate,:,t),cumtrans)
-	call random_number(rndnum)
-	nextstate = locate_greater(cumtrans,rndnum)
-	
-	!Check if an individual survives to the next period
-	call random_number(rndnum)
-	if (rndnum > surv(t,h)) then !a person is dead
-		life_assets(t+2:lifespan+1) = -1
-		life_labor(t+1:lifespan) 	= -1
-		life_wage(t+1:lifespan) 	= -1
-		life_earnings(t+1:lifespan) = -1
-		life_medexp(t+1:lifespan) 	= -1
-		if (app_age>age) then !individual didn't apply for the benefits
-			app_age = -1
-		endif
-		
-		exit !exit DO loop
-	endif
 enddo
 
 life_assets(t+1) = acur

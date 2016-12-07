@@ -69,8 +69,12 @@ function locate_greater(inarray,num)
 	temparray = 1.0d0
 	endwhere	
 	
-	loc = maxloc(temparray)	
-	locate_greater = loc(1)	
+	if (maxval(temparray)>0.0d0) then	!if there are element greater then given number
+		loc = maxloc(temparray)	
+		locate_greater = loc(1)
+	else							!all elements are smaller than a given number	
+		locate_greater = 0
+	endif
 	
 	deallocate(temparray)
 end function locate_greater
