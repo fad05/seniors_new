@@ -16,7 +16,7 @@ subroutine labchoice (lchoice, cons, util, acur,anext, h, wage, mexp,ss,age,coho
 	!variables necessary to use minpack and local variables
     integer (kind = 4) info, i, u_max_index, u_min_index
     integer (kind = 4) :: counter = 0 !counter for search attempts
-    real (kind = 8) fvec(1), lc(1), lmax, labgrid_max, uchoice, ctemp, lguess, utemp
+    real (kind = 8) fvec(1), lc(1), lmax, lmin, labgrid_max, uchoice, ctemp, lguess, utemp
     real (kind = 8) u0, c0 !utility and consumption IF labor is 0, GIVEN assets, mexp, wage
     real (kind = 8) bma ! bma stands for "b medicaid"; computed in a way such that consuption floor cmin is satisfied; in this case anext MUST be 0
     real (kind = 8), dimension(100) :: labgrid, cgrid, ugrid
@@ -58,6 +58,7 @@ subroutine labchoice (lchoice, cons, util, acur,anext, h, wage, mexp,ss,age,coho
 	ss_scaled = ss/scale_factor
 	
 	lmax = (ltot - kappa - 1)/scale_factor !maximum possible labor minus one working hour, SCALED
+	lmin = hmin/scale_factor
 	
 	!Scale parameters of utility functon!
 	ltot_scaled = ltot/scale_factor
@@ -67,7 +68,7 @@ subroutine labchoice (lchoice, cons, util, acur,anext, h, wage, mexp,ss,age,coho
     !check some points on the grid of labor, looking for good starting point for solver.
     !The grid spans from small positive (nonzero) number to max possible labor (ltot-kappa) minus small number, all scaled
     !The grid has 100 equally spaced nodes.
-    call linspace(1.0d-3,lmax,100,labgrid) !GRID is ALSO SCALED, starting with ONE WORKING HOUR
+    call linspace(lmin,lmax,100,labgrid) !GRID is ALSO SCALED, starting with ONE WORKING HOUR
 !=========================END SCALING========================================================================================
 	
     
@@ -85,7 +86,7 @@ subroutine labchoice (lchoice, cons, util, acur,anext, h, wage, mexp,ss,age,coho
     !IMPORTANT REFERENCE POINTS:
     ! Utility and consumption IF labor is 0:
     call cons_util_calc(0.0d0,wage,acur_scaled,anext_scaled,mexp_scaled,ss_scaled,c0,u0)
-    ! Utility and cons at first grdpoint (1 hour of work)
+    ! Utility and cons at first grdpoint (hmin hours of work)
     call cons_util_calc(labgrid(1),wage,acur_scaled, anext_scaled,mexp_scaled,ss_scaled,ctemp,utemp)
     
     ! IF maximum is achieved almost at 0 on gridpoint 1, we compare it to utility at 0

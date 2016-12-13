@@ -45,7 +45,7 @@ subroutine lc_simulation(cohort,in_asset,in_aime,in_wage,in_mexp,in_health,years
 	use parameters
 	use procedures
 	integer, intent(in) :: cohort, in_health
-	real (kind = 8), intent(in) :: in_asset, in_aime,in_wage,in_mexp
+	real (kind = 8)		:: in_asset, in_aime,in_wage,in_mexp
 	integer, intent(in) :: years_aime
 	real (kind = 8), dimension(lifespan,nwagebins), intent(in) :: wage
 	real (kind = 8), dimension(lifespan), intent(in) :: wzmean, wzsd,logwage
@@ -369,6 +369,7 @@ open(unit=15,file='data_output/life_medexp.txt',status='replace')
 open(unit=16,file='data_output/app_age.txt',status='replace')
 
 counter = 0
+first = .TRUE.
 
 do i = 1,nsim !simulate "nsim" individuals of given type
 	!First, make a draw to define jointly health status AND presence of assets
@@ -376,12 +377,12 @@ do i = 1,nsim !simulate "nsim" individuals of given type
 	
 	call random_number(rndnum)
 	if (rndnum <= cdf_ah(ind_subtype,2)) then 	!assets = 0, trivariate lognormal draw
-		counter = counter + 1
-		if (counter == 1) then
-			first = .TRUE.
-		else
-			first = .FALSE.
-		endif
+!		counter = counter + 1
+!		if (counter == 1) then
+!			first = .TRUE.
+!		else
+!			first = .FALSE.
+!		endif
 		call random_mvnorm(3, 	real(joint_awma0(ind_subtype,1:3),4), &
 								real(joint_awma0(ind_subtype,4:9),4), fchol3, first, draw3, ier)
 		in_aime 	= real(exp(draw3(1)),8)
@@ -394,12 +395,12 @@ do i = 1,nsim !simulate "nsim" individuals of given type
 			in_health = 2 !good health
 		endif
 	else										!assets>0, quadrivariate lognormal draw
-		counter = counter + 1
-		if (counter == 1) then
-			first = .TRUE.
-		else
-			first = .FALSE.
-		endif
+!		counter = counter + 1
+!		if (counter == 1) then
+!			first = .TRUE.
+!		else
+!			first = .FALSE.
+!		endif
 		call random_mvnorm(4, 	real(joint_awma(ind_subtype,1:4),4), &
 								real(joint_awma(ind_subtype,5:14),4), fchol4, first, draw4, ier)
 		in_aime 	= real(exp(draw4(1)),8)
@@ -412,9 +413,12 @@ do i = 1,nsim !simulate "nsim" individuals of given type
 			in_health = 2 !good health
 		endif
 	endif
-!	if (i == 97) then
-!		read (*,*)
-!	endif
+	
+	print *, i
+	if ( i == 77) then
+		print *, 'pause'
+	endif
+	
 	call lc_simulation(cohort,in_asset,in_aime,in_wage,in_mexp,in_health, init_workyears, wagegrid(:,:,ind_type), &
 				logwage(:,ind_type),wzmean(:,ind_type),wzsd(:,ind_type), wbinborders, &
 				mexpgrid(:,:,:,ind_type),logmexp(:,:,ind_type),mzmean(:,:,ind_type),mzsd(:,:,ind_type), mbinborders, &
@@ -762,9 +766,9 @@ subroutine valfun(cohort,wage,medexp,transmat,surv,ms,vf,vf_na,pf,pf_na,lchoice,
 		                    !First, we calculate next-period B (it's going to be off the grid), and use linear interpolation to calculate
 		                    !value functions between points of B. Then we have to take expectation of these interpolations.
 		                    !On top of that, we need to control for application age: an individual can't apply if she's younger than 62
-		                    if (k == grid_ss) then
-								print *, 'checkpoint'
-		                    endif
+!		                    if (k == grid_ss) then
+!								print *, 'checkpoint'
+!		                    endif
 		                    
 		                    !current benefit, in monetary terms
 		                    b = ss(k) 
@@ -855,7 +859,7 @@ use parameters
 use procedures
 implicit none
 integer, intent(in) :: cohort, in_health
-real (kind = 8), intent(in) :: in_asset, in_aime,in_wage,in_mexp
+real (kind = 8) 	:: in_asset, in_aime,in_wage,in_mexp
 integer, intent(in) :: years_aime
 real (kind = 8), dimension(lifespan,nwagebins), intent(in) :: wage
 real (kind = 8), dimension(lifespan), intent(in) :: wzmean, wzsd,logwage
@@ -888,7 +892,7 @@ integer iwprev,iwnext,imprev,imnext !indices of previous and next gridpoints in 
 !values of bin borders IN NUMBRS, NOT IN LOG DEVIATIONS (NOTE THE DIFFERENCE FROM WBINBORDERS); 
 !FIRST BIN NOT LIMITED FROM BELOW, UPPER BIN IS NOT LIMITED FRO ABOVE
 !ONLY PURPOSE OF THIS IS TO DETERMINE INITIAL STATE
-real (kind = 8) init_wage_bins(nwagebins-2), init_mexp_bins(nmedbins-2) 
+real (kind = 8) init_wage_bins(nwagebins-1), init_mexp_bins(nmedbins-1) 
 
 
 real (kind = 8) rndnum, statvec(statesize), cumstvec(statesize), cumtrans(statesize)
@@ -932,30 +936,34 @@ call logspace(asset_min,asset_max,grid_asset-1,assets(2:grid_asset))
 call logspace(ss_min,ss_max,grid_ss-1,ss(2:grid_ss))
 
 
-!------------------------------------------
-!!calculate initial stationry distribution of states at age 50 and determine initial state by random draw
-!call stationary_dist(transmat(:,:,1),statvec)
-!call cumsum(statvec,cumstvec)
-!call random_number(rndnum) !get a random number from uniform (0,1) distribution
-!nextstate = locate_greater(cumstvec,rndnum) !see where this number falls in cumulative current distribution
-!------------------------------------------
+h = in_health
+!ensure that inputs are within the borders
+in_wage 	= min(max(in_wage,wage(1,1)),wage(1,5))
+in_mexp 	= min(max(in_mexp,mexp(1,h,1)),mexp(1,h,5))
+in_asset 	= min(in_asset,asset_max)
+in_aime		= min(in_aime,aime_max)
 
-!determine current state, given initial health, wage and mexp
-	do i = 1,nwagebins-2
-		init_wage_bins(i) = exp(logwage(1)+wbinborders(t,i+1))
+
+!determine current state, given initial health, wage and mexp, given health status
+
+
+	
+	do i = 1,nwagebins-1
+		init_wage_bins(i) = exp(logwage(1)+wbinborders(1,i+1))
 	enddo
-	do i = 1,nmedbins-2
-		init_mexp_bins(i) = exp(logmexp(1,h)+mbinborders(t,i+1))
+	do i = 1,nmedbins-1
+		init_mexp_bins(i) = exp(logmexp(1,h)+mbinborders(1,i+1))
 	enddo
-	h = in_health
 
 	!determine wage and mexp bin
-	w = locate_greater(wage(1,:),in_wage)
-	m = locate_greater(mexp(1,h,:),in_mexp)
+	w = locate_greater(init_wage_bins,in_wage)
+	m = locate_greater(init_mexp_bins,in_mexp)
 	!determine last bins
 	if 		(w == 0) then
 		w = nwagebins
-	elseif 	(m == 0) then
+	endif
+	
+	if 	(m == 0) then
 		m = nmedbins
 	endif
 	
@@ -979,108 +987,49 @@ do t = 1,lifespan
 	life_wage(t) 	= wcur
 	life_medexp(t) 	= mcur
 	
-	!now, we need to update state, using transition matrix
-	call cumsum(transmat(curstate,:,t),cumtrans)
-	call random_number(rndnum)
-	nextstate = locate_greater(cumtrans,rndnum)
-	
-	!Check if an individual survives to the next period
-	call random_number(rndnum)
-	if (rndnum > surv(t,h)) then !a person is dead
-		life_assets(t+2:lifespan+1) = -1
-		life_labor(t+1:lifespan) 	= -1
-		life_wage(t+1:lifespan) 	= -1
-		life_earnings(t+1:lifespan) = -1
-		life_medexp(t+1:lifespan) 	= -1
-		if (app_age>age) then !individual didn't apply for the benefits
-			app_age = -1
-		endif
-		
-		exit !exit DO loop
-	endif
-	
-	!	A) ASSETS HISTORY UPDATE
-	
-	!determine wage shock and med shock corresponding to the current state; we're going to need it for AIME update
-	!that is, which bin we're at now for wage and for med exp
-	w = int(ms(curstate,1))
-	m = int(ms(curstate,2))
-	h = int(ms(curstate,3))
-	!given the bin, make two draws from truncated normal for both wage and med exp
-	!First, draw wage residual
-	if (w /= 1 .AND. w /= nwagebins) then !not first and not last bin
-		call truncated_normal_ab_sample(wzmean(t),wzsd(t),wbinborders(t,w), &
-										wbinborders(t,w+1),tn_seed,wage_tn)
-	elseif (w == 1) then !first bin
-		call truncated_normal_ab_mean (wzmean(t), wzsd(t), wbinborders(t,1), wbinborders(t,2), bin_mean) !calculate mean of the first bin
-		call truncated_normal_ab_sample(wzmean(t),wzsd(t),bin_mean, & 		!draw residal from mean of the first bin to edge of the first bin 
-										wbinborders(t,2),tn_seed,wage_tn)
-	elseif (w == nwagebins) then !last bin
-		call truncated_normal_ab_mean (wzmean(t), wzsd(t), wbinborders(t,nwagebins), &
-		 wbinborders(t,nwagebins+1), bin_mean) !calculate mean of the last bin
-		call truncated_normal_ab_sample(wzmean(t),wzsd(t),wbinborders(t,nwagebins), &
-										bin_mean,tn_seed,wage_tn)
+	! Find nearest wage grid points
+	if (life_wage(t)>=wage(t,w) .AND. w /= 5) then
+		iwprev = w
+		iwnext = w + 1
 	else
-		print *, "Something's wrong with current wage state"
-		read (*,*)
-		stop
+		iwprev = w - 1
+		iwnext = w
 	endif
-	
-	
-	! Calculate wage
-	wcur = exp(logwage(t)+wage_tn)
-	
-	!	B) WAGE HISTORY UPDATE
-	
-	
-
-	! Second draw med exp residuals
-	if (m /= 1 .AND. m /= nmedbins) then
-		call truncated_normal_ab_sample(mzmean(t,h),mzsd(t,h),mbinborders(t,m), &
-										mbinborders(t,m+1),tn_seed,med_tn)
-	elseif (m == 1) then
-		call truncated_normal_ab_mean 	(mzmean(t,h), 	mzsd(t,h), mbinborders(t,1), mbinborders(t,2), bin_mean) !calculate mean of the first bin
-		call truncated_normal_ab_sample	(mzmean(t,h),	mzsd(t,h), bin_mean, &
-										mbinborders(t,2),tn_seed,med_tn)
-	elseif (m == nmedbins) then
-		call truncated_normal_ab_mean 	(mzmean(t,h), 	mzsd(t,h),	mbinborders(t,nmedbins), &
-		 mbinborders(t,nmedbins+1), bin_mean) !calculate mean of the last bin
-		call truncated_normal_ab_sample	(mzmean(t,h),	mzsd(t,h),	mbinborders(t,nmedbins), &
-										bin_mean,tn_seed,med_tn)
-	else
-		print *, "Something's wrong with current med exp state"
-		read (*,*)
-		stop
-	endif
-	! Calculate med exp
-	mcur = exp(logmexp(t,h)+med_tn)
-	
-	!	C) MEDICAL EXPENSES HISTORY UPDATE
 	
 	! Nearest med grid points
-	if (life_medexp(t)>=mexp(t,h,m)) then
+	if (life_medexp(t)>=mexp(t,h,m) .AND. m /= 5) then
 		imprev = m
 		imnext = m + 1
 	else
 		imprev = m - 1
 		imnext = m
 	endif
+	
 	!check the next period benefit calculation regime
 	if (workyears<35) then
 		bcalc = 1
 	else
 		bcalc = 2
 	endif
-		
+	
 	!given current aime, calculate current "potential" benefit bcur (the amount one will receive IF 1) eligible 2)chooses to apply)
 	call benefit_calc(cohort,age,aime,bcur)
+	bcur = min(bcur,ss_max)
 	!given current benefit, calculate two closest locations on benefit grid
-	ibprev = locate_greater(ss,bcur)-1 !index of closest asset on the grid from below
-	ibnext = ibprev+1 !index of closest asset on the grid from above
+	ibnext = locate_greater(ss,bcur) !index of closest asset on the grid from above
+	if (ibnext == 0) then 
+		ibnext = grid_ss
+	endif
+	
+	if (ibnext /= 1) then
+		ibprev = ibnext-1 !index of closest asset on the grid from below
+	else
+		ibprev = 1
+		ibnext = 2
+	endif
 	!given current asset, calculate two closest locations on asset grid
 	iaprev = locate_greater(assets,acur)-1 !index of closest asset on the grid from below
-	ianext = iaprev+1 !index of closest asset on the grid from above	
-	
+	ianext = iaprev+1 !index of closest asset on the grid from above
 	
 	!	Now we have two ends of 4-tuple: (iaprev,ibprev,iwprev,imprev); (ianext,ibnext,iwnext,imnext)
 	!	However, value function at a given period t is 3-dimensional: 
@@ -1217,7 +1166,7 @@ do t = 1,lifespan
 	!2) age>=62 AND age<app_age: not yet applied, but we must check whether applies: compare values of two quadrilinear interpolations and use higher one (change app_age if it is the case)
 	!3) age>=62 AND age>age_app: already applied, use only vf (not vf_na)
 	
-	!Before calculating interpolated assets and labor choice, we check if individual is eligible and didn't apply yet. If it's the case, we
+	!Before calculating interpolated NEXT PERIOD assets and CURRENT labor choice, we check if individual is eligible and didn't apply yet. If it's the case, we
 	!switch app_age to a current age
 	
 	if (age>=62 .AND. age<app_age) then 
@@ -1243,7 +1192,7 @@ do t = 1,lifespan
 	
 	!NOW, we calculate interpolated assets and labor
 	if (age<62 .OR. (age>=62 .AND. age<app_age)) then !individual 1) can't apply or 2) can but doesn't (we checked it before)
-		!Here, we only use vf_na to construct current assets and labor choice; quadlin
+		!Here, we only use vf_na to construct NEXT PERIOD assets and CURRENT PERIOD labor choice; quadlin
 		!(x,y,z,q) == (a,w,m,b)
 		apx = quadlin(	acur,wcur,mcur,bcur, &
 						assets(iaprev),wage(t,iwprev),mexp(t,h,imprev),ss(ibprev), &
@@ -1258,9 +1207,11 @@ do t = 1,lifespan
 						
 		!we have to update AIME
 		if (bcalc == 1) then !individual worked less than 35 years
-			aime = aime + wcur*lpx/35.0 		      !next period aime grows              
+			aime = aime + wcur*lpx/35.0 		      !next period aime grows
+			aime = min(aime,aime_max)              
 		else !individual aready has more than 35 working years
 			aime = aime + max(0.0,(wcur*lpx-aime)/35.0) !next-period aime doesn't decline
+			aime = min(aime,aime_max) 
 		endif
 		
 		!update number of working years (if individual worked)
@@ -1268,7 +1219,7 @@ do t = 1,lifespan
 			workyears = workyears+1
 		endif
 	elseif (age>=62 .AND. age>=app_age) then !individual applied		
-		!calculate interpolated assets and labor choice using functions of applicants
+		!calculate interpolated next-period assets and labor choice using functions of applicants
 		apx = quadlin(	acur,wcur,mcur,bcur, &
 						assets(iaprev),wage(t,iwprev),mexp(t,h,imprev),ss(ibprev), &
 						assets(ianext),wage(t,iwnext),mexp(t,h,imnext),ss(ibnext), & 
@@ -1285,17 +1236,96 @@ do t = 1,lifespan
 		stop 
 	endif
 	
-	!given this, update acur for the next iteration
-	acur = apx	!notice, that we will put this value into the vector of lifetime assets in the beginning of next cycle	
+	!define anext
+	anext = apx	!notice, that we will put this value into the vector of lifetime assets in the beginning of next cycle	
 	!put labor into personal working history
 	
-	!	D) LABOR HISTORY UPDATE
+	!	LABOR HISTORY UPDATE
 	life_labor(t) = lpx
 	!Fill in individual history	
 	
-	!	E) EARNINGS HISTORY UPDATE
-	life_earnings(t) = 	wcur*life_labor(t)
+	!	EARNINGS HISTORY UPDATE
+	life_earnings(t) = 	wcur*life_labor(t)	
+
+!-----------------------------------------------------------------------
+!	Now we know everything for current period, including labor hoice and optimal next period asset choice.
+ 
+!	We need to update state, using transition matrix
+	call cumsum(transmat(curstate,:,t),cumtrans)
+	call random_number(rndnum)
+	nextstate = locate_greater(cumtrans,rndnum)
 	
+	!Check if an individual survives to the next period
+	!notice that at age 90 an individual doesn't survive
+	call random_number(rndnum)
+	if (rndnum > surv(t,h)) then !a person is dead
+		life_assets(t+2:lifespan+1) = -1
+		life_labor(t+1:lifespan) 	= -1
+		life_wage(t+1:lifespan) 	= -1
+		life_earnings(t+1:lifespan) = -1
+		life_medexp(t+1:lifespan) 	= -1
+		if (app_age>age) then !individual didn't apply for the benefits
+			app_age = -1
+		endif
+		
+		exit !exit DO loop
+	endif
+	
+!	Given that we know next period state, we can determine wage and medical expenses for the next period
+	
+	!determine wage shock and med shock corresponding to the next-period state,
+	!that is, which bin we're at now for wage and for med exp
+	w = int(ms(nextstate,1))
+	m = int(ms(nextstate,2))
+	h = int(ms(nextstate,3))
+	!given the bin, make two draws from truncated normal for both wage and med exp next period
+	!First, draw wage residual
+	if (w /= 1 .AND. w /= nwagebins) then !not first and not last bin
+		call truncated_normal_ab_sample(wzmean(t+1),wzsd(t+1),wbinborders(t+1,w), &
+										wbinborders(t+1,w+1),tn_seed,wage_tn)
+	elseif (w == 1) then !first bin
+		call truncated_normal_ab_mean (wzmean(t+1), wzsd(t+1), wbinborders(t+1,1), wbinborders(t+1,2), bin_mean) !calculate mean of the first bin
+		call truncated_normal_ab_sample(wzmean(t+1),wzsd(t+1),bin_mean, & 		!draw residal from mean of the first bin to edge of the first bin 
+										wbinborders(t+1,2),tn_seed,wage_tn)
+	elseif (w == nwagebins) then !last bin
+		call truncated_normal_ab_mean (wzmean(t+1), wzsd(t+1), wbinborders(t+1,nwagebins), &
+		 wbinborders(t+1,nwagebins+1), bin_mean) !calculate mean of the last bin
+		call truncated_normal_ab_sample(wzmean(t+1),wzsd(t+1),wbinborders(t+1,nwagebins), &
+										bin_mean,tn_seed,wage_tn)
+	else
+		print *, "Something's wrong with current wage state"
+		read (*,*)
+		stop
+	endif
+	
+	
+	! Calculate wage
+	wcur = exp(logwage(t+1)+wage_tn)	
+	
+
+	! Second draw med exp residuals
+	if (m /= 1 .AND. m /= nmedbins) then
+		call truncated_normal_ab_sample(mzmean(t+1,h),mzsd(t+1,h),mbinborders(t+1,m), &
+										mbinborders(t+1,m+1),tn_seed,med_tn)
+	elseif (m == 1) then
+		call truncated_normal_ab_mean 	(mzmean(t+1,h), mzsd(t+1,h), mbinborders(t+1,1), mbinborders(t+1,2), bin_mean) !calculate mean of the first bin
+		call truncated_normal_ab_sample	(mzmean(t+1,h),	mzsd(t+1,h), bin_mean, &
+										mbinborders(t+1,2),tn_seed,med_tn)
+	elseif (m == nmedbins) then
+		call truncated_normal_ab_mean 	(mzmean(t+1,h), mzsd(t+1,h), mbinborders(t+1,nmedbins), &
+		 mbinborders(t+1,nmedbins+1), bin_mean) !calculate mean of the last bin
+		call truncated_normal_ab_sample	(mzmean(t+1,h),	mzsd(t+1,h), mbinborders(t+1,nmedbins), &
+										bin_mean,tn_seed,med_tn)
+	else
+		print *, "Something's wrong with current med exp state"
+		read (*,*)
+		stop
+	endif
+	! Calculate med exp
+	mcur = exp(logmexp(t+1,h)+med_tn)
+	
+	!update assets
+	acur = anext
 	
 enddo
 
