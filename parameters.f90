@@ -1,10 +1,10 @@
 module parameters
     integer, parameter :: grid_asset = 11, grid_ss = 11 ,nwagebins = 5, nmedbins = 5, ntypes = 8, nhealth = 2
-    integer, parameter :: lifespan = 41, ltot = 4800, kappa = 900, d = 100000, hmin = 400
+    integer, parameter :: lifespan = 41, ltot = 4800, kappa = 900, d = 100000, hmin = 1
     integer, parameter :: statesize = nwagebins*nmedbins*nhealth
     integer, parameter :: nsim = 1000 !number of simulations
     integer, parameter :: init_workyears = 25											
-    real (kind = 8), parameter ::  beta = 0.95d0, delta = 0.2d0, eta = 1.8d0, r = 2.0d-2, sigma = 3.75d0, ugamma = 0.5d0
+    real (kind = 8), parameter ::  beta = 0.95d0, delta = 0.2d0, eta = 1.8d0, r = 2.0d-2, sigma = 3.75d0, ugamma = 0.5d0, xi = 1.4d0, nu = 2.0d0
     real (kind = 8), parameter :: tol = 1.0d-6, asset_min = 1.0d3, asset_max = 5.0d5, cmin = 2600
     !inflation adjustment : http://data.bls.gov/cgi-bin/cpicalc.pl
     !I calculate cap in the following way: calculate PIA at NRA taking base income from the table and increase PIA actuarially until age 70

@@ -419,10 +419,10 @@ do i = 1,nsim !simulate "nsim" individuals of given type
 		print *, 'pause'
 	endif
 	
-	call lc_simulation(cohort,in_asset,in_aime,in_wage,in_mexp,in_health, init_workyears, wagegrid(:,:,ind_type), &
-				logwage(:,ind_type),wzmean(:,ind_type),wzsd(:,ind_type), wbinborders, &
-				mexpgrid(:,:,:,ind_type),logmexp(:,:,ind_type),mzmean(:,:,ind_type),mzsd(:,:,ind_type), mbinborders, &
-				ms, transmat(:,:,:,ind_type),vf,vf_na,pf,pf_na,lchoice,lchoice_na,app_policy, surv(:,:,ind_type), &
+	call lc_simulation(1,in_asset,in_aime,in_wage,in_mexp,in_health, init_workyears, wagegrid(:,:,2), &
+				logwage(:,2),wzmean(:,2),wzsd(:,2), wbinborders, &
+				mexpgrid(:,:,:,2),logmexp(:,:,2),mzmean(:,:,2),mzsd(:,:,2), mbinborders, &
+				ms, transmat(:,:,:,2),vf,vf_na,pf,pf_na,lchoice,lchoice_na,app_policy, surv(:,:,2), &
 				life_assets,life_labor,life_earnings, life_wage, life_medexp,app_age,tn_seed)
 	!save the simulation results to .csv files
 	do j = 11,16 

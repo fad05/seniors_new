@@ -11,11 +11,11 @@ subroutine labchoice (lchoice, cons, util, acur,anext, h, wage, mexp,ss,age,coho
     !SCALED VARIABLES
     real (kind = 8) acur_scaled, anext_scaled, mexp_scaled, ss_scaled, lchoice_scaled
     real (kind = 8) :: ltot_scaled
-	real (kind = 8) :: kappa_scaled
+	real (kind = 8) :: kappa_scaled, xi_scaled
 	real (kind = 8) :: cmin_scaled
 	!variables necessary to use minpack and local variables
     integer (kind = 4) info, i, u_max_index, u_min_index
-    integer (kind = 4) :: counter = 0 !counter for search attempts
+    integer (kind = 4) :: counter !counter for search attempts
     real (kind = 8) fvec(1), lc(1), lmax, lmin, labgrid_max, uchoice, ctemp, lguess, utemp
     real (kind = 8) u0, c0 !utility and consumption IF labor is 0, GIVEN assets, mexp, wage
     real (kind = 8) bma ! bma stands for "b medicaid"; computed in a way such that consuption floor cmin is satisfied; in this case anext MUST be 0
@@ -63,6 +63,7 @@ subroutine labchoice (lchoice, cons, util, acur,anext, h, wage, mexp,ss,age,coho
 	!Scale parameters of utility functon!
 	ltot_scaled = ltot/scale_factor
 	kappa_scaled = kappa/scale_factor
+	xi_scaled = xi/scale_factor
 	cmin_scaled = cmin/scale_factor
 	
     !check some points on the grid of labor, looking for good starting point for solver.
@@ -83,44 +84,27 @@ subroutine labchoice (lchoice, cons, util, acur,anext, h, wage, mexp,ss,age,coho
     labgrid_max = labgrid(u_max_index)
     lguess = labgrid_max !initial guess on optimal labor choice OFF the grid: maximum ON the grid
     
-    !IMPORTANT REFERENCE POINTS:
-    ! Utility and consumption IF labor is 0:
-    call cons_util_calc(0.0d0,wage,acur_scaled,anext_scaled,mexp_scaled,ss_scaled,c0,u0)
-    ! Utility and cons at first grdpoint (hmin hours of work)
-    call cons_util_calc(labgrid(1),wage,acur_scaled, anext_scaled,mexp_scaled,ss_scaled,ctemp,utemp)
-    
-    ! IF maximum is achieved almost at 0 on gridpoint 1, we compare it to utility at 0
-    if (u_max_index == 1 .AND. u0>=utemp) then 
-			lchoice = 0.0d0
-			util = u0
-			cons = c0
-	!ELSE, IF MAXIMUM is achieved elsewhere on the grid, we optimize.
-	else   
+
 !	1.Bracketing method, slowest but sure
 !	We're looking for maximum 
-		if (u_max_index == 1 .AND. u0<utemp) then !IF UTILITY ALMOST AT 0 is LARGER THAN UTILITY AT 0
-			call cons_util_calc(0.0d0,wage,acur_scaled,anext_scaled,mexp_scaled,ss_scaled,c0,u0)
-			call cons_util_calc(labgrid(1),wage,acur_scaled, anext_scaled,mexp_scaled,ss_scaled,ctemp,utemp)
-			print *, 'U at 0:', u0
-			print *, 'U at labgrid(1):', utemp
-			print *, 'Utility at 0 is lower than utility almost at zero, something''s wrong. Press any button and check the labchoice.f95'
-			read (*,*)
-			print *, 'Proceeding with bracketing method'
-			a = 0.0d0
-			ua = u0
-			b = labgrid(1)
-			ub = ugrid(1)
-			c = labgrid(2)
-			uc = ugrid(2)
-		else	
-			a = labgrid(u_max_index-1)
-			ua = ugrid(u_max_index-1)
-			b = labgrid(u_max_index)
-			ub = ugrid(u_max_index)
-			c = labgrid(u_max_index+1)
-			uc = ugrid(u_max_index+1)
-		endif
+
+	if (u_max_index == 1) then
+		lchoice_scaled = labgrid(1)
+	else
+		a = labgrid(u_max_index-1)
+		ua = ugrid(u_max_index-1)
+		b = labgrid(u_max_index)
+		ub = ugrid(u_max_index)
+		c = labgrid(u_max_index+1)
+		uc = ugrid(u_max_index+1)
+	
+		counter = 0
+		
 		do while (c-a>1.0d-3) !the tolerance is ohe hour (1E-3 of 1000s of hours)
+			counter = counter + 1
+			if (counter > 1000) then
+				print *, 'pause'
+			endif
 			if (b-a<=c-b) then
 				dnew = (b+c)/2.0
 				call cons_util_calc(dnew, wage, acur_scaled, anext_scaled, mexp_scaled, ss_scaled,cd, ud)  
@@ -147,19 +131,21 @@ subroutine labchoice (lchoice, cons, util, acur,anext, h, wage, mexp,ss,age,coho
 				uc = ud
 			endif
 		enddo
+		lchoice_scaled = c	
+	endif
 		
-		lchoice_scaled = c		
-		call cons_util_calc(lchoice_scaled, wage, acur_scaled, anext_scaled, mexp_scaled, ss_scaled,cons, util)
-		lchoice = lchoice_scaled*scale_factor !solution, expressed in hours
+	call cons_util_calc(lchoice_scaled, wage, acur_scaled, anext_scaled, mexp_scaled, ss_scaled,cons, util)
+	lchoice = lchoice_scaled*scale_factor !solution, expressed in hours
 		
-!		!scale back
-!		lchoice = lchoice*scale_factor
-!		cons = cons*scale_factor
-!		util = util*scale_factor**(1-sigma)
-		
-	endif ! END IF maximum achieved not on the first value of the grid
+    ! Utility and consumption IF labor is 0:
+    call cons_util_calc(0.0d0,wage,acur_scaled,anext_scaled,mexp_scaled,ss_scaled,c0,u0)
+    
+    !if utility at 0 is at least as good as utility in nonzero
+    if (u0 >= util) then
+		lchoice = 0.0d0
+	endif
 
-    return !end of subroutine
+return !end of subroutine
 
     contains
         
@@ -207,7 +193,7 @@ subroutine labchoice (lchoice, cons, util, acur,anext, h, wage, mexp,ss,age,coho
 						utl = -1.0d5
 					endif	
 				endif
-			else !labor is larger than zero; the changes are in utility functon: notice KAPPA there
+			else !labor is larger than zero; the changes are in utility functon: notice KAPPA and XI there
 				if (anxt == 0) then !next-period assets are zero: agent is eligible for minimal consumption level					
 					if (cns > cmin_scaled) then
 						utl = ((1+delta*(h-1))*(cns**ugamma*(ltot_scaled-lbr-kappa_scaled)**(1-ugamma))**(1-sigma))/(1-sigma) 
