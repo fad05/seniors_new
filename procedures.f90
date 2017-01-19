@@ -496,5 +496,23 @@ endif
 
 end subroutine earnings_test
 
+function square_distance(vec1,vec2)
+implicit none
+real (kind = 8) square_distance
+real (kind = 8), dimension(:), intent(in) 	:: vec1, vec2
+real (kind = 8), dimension(:), allocatable 	:: diff
+
+if (size(vec1) /= size(vec2)) then
+	print *, 'square_distance error: Input vectors are of different length!'
+	print *, 'Press any button.'
+	read (*,*)
+	square_distance = -1.0d0
+	call abort
+else
+	diff = vec1-vec2
+	square_distance = sum(diff**2)
+endif
+end function square_distance
+
 
 end module procedures

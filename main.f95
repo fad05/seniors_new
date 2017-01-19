@@ -83,6 +83,7 @@ real (kind = 8) statvec(statesize), cumstvec(statesize) !stationary distribution
 !	4.	rule of how bins are organised : -inf<mu-1.5sd<mu-0.5sd<m+0.5sd<mu+1.5sd<+inf; 
 !	3.	mean and as of parenting normal. Then, given the rule the bins are organised as above, I make a necessary draw from truncated normal!
 real (kind = 8) logwagedata(lifespan,3,ntypes), logwage(lifespan,ntypes), wzmean(lifespan,ntypes), wzsd(lifespan,ntypes) 
+real (kind = 8) lwagetemp(16,ntypes)
 real (kind = 8) wagegrid(lifespan,nwagebins,ntypes) !wage grid points, on bin means
 real (kind = 8) wagetrans(nwagebins,nwagebins,lifespan-1) !transition matrix between wage bins
 real (kind = 8) wbinborders(lifespan,nwagebins+1) !n bins => n+1 borders
@@ -152,7 +153,17 @@ real (kind = 8) prob_ah(4,4), cdf_ah(4,4) 		!4 = male/femele * college/noncolleg
 real (kind = 8) joint_awma0(4,9) 				!4 = male/femele * college/noncollege; 9 = mu_a, mu_w, mu_m + varcov mat (6 values)
 real (kind = 8) joint_awma(4,14)				!4 = male/femele * college/noncollege; 14 = mu_a, mu_w, mu_m, mu_assets + varcov mat (10 values)
 
+!Variables containing data moments
+real (kind = 8), dimension(:), allocatable ::	datalfp, datahours, datassets, dataret
+real (kind = 8), dimension(:), allocatable ::	modellfp, modelhours, modelassets, modelret
+
+!Miscellaneous varables
+real (kind = 8) ssr
+
+
 !PROGRAM BODY
+
+testparam = 3
 
 !-----------------------------------------------------------------------
 !1. Import files
@@ -246,6 +257,17 @@ do i = 1,ntypes
 	WRITE(datafile,'(a,i1,a)') "data_inputs/lwage_smooth_",i,".csv"
 	call import_data(datafile,logwagedata(:,:,i))
 	logwage(:,i) = logwagedata(:,1,i)
+!	Artificially decrease wage: starting at age 60 to age 75 (16 points), linear dectrase
+!	Temporary code!
+
+!	call linspace(logwage(11,i),0.0d0,16,lwagetemp(:,i))
+!	logwage(11:26,i) = lwagetemp(:,i)
+!	logwage(27:lifespan,i) = 0.0d0
+
+	logwage(:,i) = 0.5*logwage(:,i)
+
+!	End of temporary code
+
 	wzmean(:,i) = logwagedata(:,2,i)
 	wzsd(:,i) = logwagedata(:,3,i)
 	!construct a wage grid: 
@@ -273,6 +295,8 @@ do i = 1,ntypes
 		enddo
 	enddo
 enddo
+
+ssr = square_distance(logwage(:,2), logwage(:,6))
 
 !-----------------------------------------------------------------------
 !3. Construct matrix of the correspondence of exostate to shocks
@@ -341,6 +365,33 @@ endif
 
 cohort = (ind_type-1)/4 + 1 !cohort is 1/2 and not 0/1 because of indexing style; it is passed to valfun, where it is passed to aime_calc and benefit_calc
 !sex = mod(ind_type,2)
+
+!----------------------
+!once the type is chosen, load data profiles for comparison: lfp, hours, assets and SS application timing
+!	1.allocate arrays
+!	data
+allocate(datalfp(tmom(cohort)))
+allocate(datahours(tmom(cohort)))
+allocate(datassets(tmom(cohort)))
+allocate(dataret(tmom(cohort)))
+!	model
+allocate(modellfp(tmom(cohort)))
+allocate(modelhours(tmom(cohort)))
+allocate(modelassets(tmom(cohort)))
+allocate(modelret(tmom(cohort)))
+!	2.load data
+write(datafile,'(a,i1.1,a)') "data_inputs/lfp_data_",ind_type,".csv"
+call import_vector(datafile,datalfp)
+write(datafile,'(a,i1.1,a)') "data_inputs/hours_data_",ind_type,".csv"
+call import_vector(datafile,datahours)
+write(datafile,'(a,i1.1,a)') "data_inputs/assets_data_",ind_type,".csv"
+call import_vector(datafile,datassets)
+
+!----------------------
+
+
+
+
 !Calculate stationary distribution of states at age 50 for that type
 call stationary_dist(transmat(:,:,1,ind_type),statvec)
 call cumsum(statvec,cumstvec)
@@ -414,15 +465,15 @@ do i = 1,nsim !simulate "nsim" individuals of given type
 		endif
 	endif
 	
-	print *, i
-	if ( i == 77) then
-		print *, 'pause'
-	endif
+!	print *, i
+!	if ( i == 77) then
+!		print *, 'pause'
+!	endif
 	
-	call lc_simulation(1,in_asset,in_aime,in_wage,in_mexp,in_health, init_workyears, wagegrid(:,:,2), &
-				logwage(:,2),wzmean(:,2),wzsd(:,2), wbinborders, &
-				mexpgrid(:,:,:,2),logmexp(:,:,2),mzmean(:,:,2),mzsd(:,:,2), mbinborders, &
-				ms, transmat(:,:,:,2),vf,vf_na,pf,pf_na,lchoice,lchoice_na,app_policy, surv(:,:,2), &
+	call lc_simulation(cohort,in_asset,in_aime,in_wage,in_mexp,in_health, init_workyears, wagegrid(:,:,ind_type), &
+				logwage(:,ind_type),wzmean(:,ind_type),wzsd(:,ind_type), wbinborders, &
+				mexpgrid(:,:,:,ind_type),logmexp(:,:,ind_type),mzmean(:,:,ind_type),mzsd(:,:,ind_type), mbinborders, &
+				ms, transmat(:,:,:,ind_type),vf,vf_na,pf,pf_na,lchoice,lchoice_na,app_policy, surv(:,:,ind_type), &
 				life_assets,life_labor,life_earnings, life_wage, life_medexp,app_age,tn_seed)
 	!save the simulation results to .csv files
 	do j = 11,16 
@@ -445,6 +496,17 @@ enddo
 
 !		END TESTING
 !-----------------------------------------------------------------------
+
+!dellocation
+deallocate(datalfp)
+deallocate(datahours)
+deallocate(datassets)
+deallocate(dataret)
+deallocate(modellfp)
+deallocate(modelhours)
+deallocate(modelassets)
+deallocate(modelret)
+
 end
 !End of main program
 !========================================================================
@@ -662,7 +724,7 @@ subroutine valfun(cohort,wage,medexp,transmat,surv,ms,vf,vf_na,pf,pf_na,lchoice,
 	            do j = 1,grid_asset     !next-period assets
 	                do i = 1,grid_asset !current assets
 	                    !First, calculate optimal labor choice
-!	                    if (age == 65 .AND. k == grid_ss .AND. i == 5 .AND. w == 2) then
+!	                    if (t == 31 .AND. k == 2 .AND. s == 41 .AND. j == 1) then
 !							print *, 'stop'
 !						endif
 						call labchoice(opt_labor, cons, util, assets(i),assets(j),h,wage(t,w),medexp(t,h,m),ss(k),age,cohort)
@@ -690,11 +752,14 @@ subroutine valfun(cohort,wage,medexp,transmat,surv,ms,vf,vf_na,pf,pf_na,lchoice,
 							do st = 1,statesize
 								vf_interp(st) = linproj(bnext_erntest,ss(k),ss(k+1),vf(j,st,k,t+1),vf(j,st,k+1,t+1)) !vf(j - next period asset, st - next-period state;k,k+1.. - indices of ss, t+1 - next period)
 							enddo
+						elseif (bnext_erntest < ss(k)) then
+							print *, 'Next period benefit can''t decrease here! An error! Press any button to proceed:'
+							read (*,*)
 		                else !no need to interpolate
 							vf_interp = vf(j,:,k,t+1)
 						endif
 	                    !unmaxed "value function"
-	                    val_nomax(i,j) = util + beta*(surv(t,h)*dot_product(vf(j,:,k,t+1),transmat(s,:,t)) &
+	                    val_nomax(i,j) = util + beta*(surv(t,h)*dot_product(vf_interp,transmat(s,:,t)) &		!notice vf_interp here, it plays a role for earnings test
 	                                + (1-surv(t,h))*beq(j))
 	                enddo
 	            enddo
@@ -713,6 +778,9 @@ subroutine valfun(cohort,wage,medexp,transmat,surv,ms,vf,vf_na,pf,pf_na,lchoice,
 !					enddo
 !				endif
 	            lchoice(:,s,k,t) = (/(lab_cur_next(l,pf(l,s,k,t)),l=1,grid_asset)/)
+!	            if (sum(lchoice(:,s,k,t))>0) then
+!	                     print *, lchoice(:,s,k,t)
+!	            endif
 	        enddo
         enddo
     enddo

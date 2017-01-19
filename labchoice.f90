@@ -39,6 +39,8 @@ subroutine labchoice (lchoice, cons, util, acur,anext, h, wage, mexp,ss,age,coho
     
     
     lchoice = -5 ! initialize with negative value
+    cgrid = -1.0d-5
+    ugrid = -2.0d-5
 
 !=========================SCALING=========================================================================================== 
 !1. WE NEED TO SCALE THE PROBLEM, UTILITY TO GIVE SENSIBLE VALUES
@@ -57,7 +59,7 @@ subroutine labchoice (lchoice, cons, util, acur,anext, h, wage, mexp,ss,age,coho
 	mexp_scaled = mexp/scale_factor
 	ss_scaled = ss/scale_factor
 	
-	lmax = (ltot - kappa - 1)/scale_factor !maximum possible labor minus one working hour, SCALED
+	lmax = (ltot - kappa - 1-xi*(age-age0)**nu)/scale_factor !maximum possible labor minus one working hour, SCALED
 	lmin = hmin/scale_factor
 	
 	!Scale parameters of utility functon!
@@ -180,7 +182,7 @@ return !end of subroutine
 			cns = (1+r)*acrnt + lbr*wg +ssec_received- anxt - mxp - taxes !uncompensated consumption; in the case when lbr==0, labor income is ZERO
 			if (lbr == 0) then !labor is zero
 				if (anxt == 0) then !next-period assets are zero: agent is eligible for minimal consulption level					
-					if (cns > cmin_scaled) then !consumption is hgher than minimal, no transfers
+					if (cns > cmin_scaled) then !consumption is higher than minimal, no transfers
 						utl = ((1+delta*(h-1))*(cns**ugamma*ltot_scaled**(1-ugamma))**(1-sigma))/(1-sigma) !NO KAPPA IN UTILITY: zero labor
 					else
 						cns = cmin_scaled !agent reseives a granted consumption floor
@@ -196,14 +198,14 @@ return !end of subroutine
 			else !labor is larger than zero; the changes are in utility functon: notice KAPPA and XI there
 				if (anxt == 0) then !next-period assets are zero: agent is eligible for minimal consumption level					
 					if (cns > cmin_scaled) then
-						utl = ((1+delta*(h-1))*(cns**ugamma*(ltot_scaled-lbr-kappa_scaled)**(1-ugamma))**(1-sigma))/(1-sigma) 
+						utl = ((1+delta*(h-1))*(cns**ugamma*(ltot_scaled-lbr-kappa_scaled-xi_scaled*(age-age0)**nu)**(1-ugamma))**(1-sigma))/(1-sigma) 
 					else
 						cns = cmin_scaled !consumption floor
-						utl = ((1+delta*(h-1))*(cns**ugamma*(ltot_scaled-lbr-kappa_scaled)**(1-ugamma))**(1-sigma))/(1-sigma)
+						utl = ((1+delta*(h-1))*(cns**ugamma*(ltot_scaled-lbr-kappa_scaled-xi_scaled*(age-age0)**nu)**(1-ugamma))**(1-sigma))/(1-sigma)
 					endif
 				else 
 					if (cns > 0) then
-						utl = ((1+delta*(h-1))*(cns**ugamma*(ltot_scaled-lbr-kappa_scaled)**(1-ugamma))**(1-sigma))/(1-sigma)
+						utl = ((1+delta*(h-1))*(cns**ugamma*(ltot_scaled-lbr-kappa_scaled-xi_scaled*(age-age0)**nu)**(1-ugamma))**(1-sigma))/(1-sigma)
 					else
 						utl = -1.0d5
 					endif	
