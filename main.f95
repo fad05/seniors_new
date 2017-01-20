@@ -62,7 +62,7 @@ subroutine lc_simulation(cohort,in_asset,in_aime,in_wage,in_mexp,in_health,years
 	real (kind = 8), dimension(grid_asset,statesize,grid_ss,lifespan,2), intent(in) :: app_policy
 	real (kind = 8), dimension(lifespan,nhealth), intent(in) :: surv
 	real (kind = 8), dimension(grid_asset,statesize,grid_ss,lifespan,2), intent(in) :: lchoice_na
-	real (kind = 8), intent(out) :: life_assets(lifespan+1)
+	real (kind = 8), intent(out) :: life_assets(lifespan)
 	real (kind = 8), dimension(lifespan), intent(out) :: life_labor, life_earnings, life_wage, life_medexp
 	integer, intent(out) :: app_age
 	integer, intent(inout) :: tn_seed
@@ -71,6 +71,12 @@ end subroutine lc_simulation
 end interface
 
 !PROGRAM VARIABLES
+
+!	1. 
+real (kind = 8) structparams(12) !STRUCTURAL PARAMETERS OF THE MODEL, THE ONES TO BE CALIBRATED
+!	The parameters are:	ltot kappa d cmin age0 beta delta eta sigma ugamma xi nu
+
+!	2.
 character*200 datafile !address of the data file on the disk
 character*30, names(5)
 real (kind = 8) statvec(statesize), cumstvec(statesize) !stationary distribution of states, and cumulative stationary distribution
@@ -118,14 +124,16 @@ real (kind = 8), dimension(grid_asset,statesize,grid_ss,lifespan+1,2) :: vf_na
 integer, dimension(grid_asset,statesize,grid_ss,lifespan,2) :: pf_na
 real (kind = 8), dimension(grid_asset,statesize,grid_ss,lifespan,2) :: app_policy
 real (kind = 8), dimension(grid_asset,statesize,grid_ss,lifespan,2) :: lchoice_na
-!results of simulation
-real (kind = 8)  life_assets(lifespan+1)
-real (kind = 8), dimension(lifespan) :: life_labor, life_earnings, life_wage, life_medexp
+!results of simulation: single simulation and averaged over "nsim" simulations
+real (kind = 8)  life_assets(lifespan), mean_lifeassets(lifespan) 
+real (kind = 8), dimension(lifespan) :: life_labor, life_earnings, life_wage, life_medexp, life_lfp, worker_wage
+real (kind = 8), dimension(lifespan) :: mean_lifelabor, mean_lifeearnings, mean_lifewage, mean_lifemedexp, mean_lfp, mean_workerwage
+integer, 		 dimension(lifespan) :: nalive, nwork !for every age, number of individuals alive at that period (to average properly) and no of indivs who work
 integer app_age
 	
 	
-integer i,j,k,l,t,w,wn,m,mn,h,hn,ind_type, ind_subtype, counter
-integer :: cohort, sex, college, health, age(lifespan) = (/(i,i=50,90)/)
+integer i,j,k,l,t,w,wn,m,mn,h,hn,ind_type, ind_subtype, counter, itype
+integer :: icoh, cohort, sex, college, health, age(lifespan) = (/(i,i=50,90)/)
 integer ms(statesize,3)
 
 !variables necessary to use "random" module;
@@ -156,6 +164,7 @@ real (kind = 8) joint_awma(4,14)				!4 = male/femele * college/noncollege; 14 = 
 !Variables containing data moments
 real (kind = 8), dimension(:), allocatable ::	datalfp, datahours, datassets, dataret
 real (kind = 8), dimension(:), allocatable ::	modellfp, modelhours, modelassets, modelret
+real (kind = 8), dimension(:), allocatable ::	moments
 
 !Miscellaneous varables
 real (kind = 8) ssr
@@ -163,7 +172,47 @@ real (kind = 8) ssr
 
 !PROGRAM BODY
 
-testparam = 3
+!	Initialize structural parameters
+!	ltot kappa d cmin age0 beta delta eta sigma ugamma xi nu
+structparams = (/3.8d3, 9.0d2, 1.0d5, 2.6d3, 5.0d1, 0.95d0, 0.2d0,  1.8d0, 3.75d0, 0.5d0, 1.4d0, 2.0d0/)
+
+ltot 	= structparams(1)
+kappa 	= structparams(2)
+d 		= structparams(3)
+cmin 	= structparams(4)
+age0 	= structparams(5)
+beta 	= structparams(6)
+delta 	= structparams(7)
+eta 	= structparams(8)
+sigma 	= structparams(9)
+ugamma 	= structparams(10)
+xi 		= structparams(11)
+nu 		= structparams(12)
+
+! Pick a type between 1 and 8, and calculate optimal labor choice matrix and value function for a chosen type (choice have been made in the beginning)
+!user inputs the type
+
+print *, "Enter an integer 1:8, which defines an individual type"
+print *, "cohort college sex"
+print *, "1: 0	0	0"
+print *, "2: 0 	0	1"
+print *, "3. 0	1	0"
+print *, "4. 0	1	1"
+print *, "5. 1	0	0"
+print *, "6. 1	0	1"
+print *, "7. 1	1	0"
+print *, "8. 1	1	1"
+
+read (*,*) itype
+print *, "Chosen type:", itype
+if (itype < 5) then
+	ind_subtype = 	itype
+else
+	ind_subtype	=	itype-4
+endif
+
+icoh = (itype-1)/4 + 1 !cohort is 1/2 and not 0/1 because of indexing style; it is passed to valfun, where it is passed to aime_calc and benefit_calc
+!sex = mod(ind_type,2)
 
 !-----------------------------------------------------------------------
 !1. Import files
@@ -341,50 +390,26 @@ enddo
 !-----------------------------------------------------------------------
 !		TESTING GROUNDS
 
-!5. Pick a type between 1 and 8, and calculate optimal labor choice matrix and value function for a chosen type (choice have been made in the beginning)
-!user inputs the type
-
-print *, "Enter an integer 1:8, which defines an individual type"
-print *, "cohort college sex"
-print *, "1: 0	0	0"
-print *, "2: 0 	0	1"
-print *, "3. 0	1	0"
-print *, "4. 0	1	1"
-print *, "5. 1	0	0"
-print *, "6. 1	0	1"
-print *, "7. 1	1	0"
-print *, "8. 1	1	1"
-
-read (*,*) ind_type
-print *, "Chosen type:", ind_type
-if (ind_type < 5) then
-	ind_subtype = 	ind_type
-else
-	ind_subtype	=	ind_type-4
-endif
-
-cohort = (ind_type-1)/4 + 1 !cohort is 1/2 and not 0/1 because of indexing style; it is passed to valfun, where it is passed to aime_calc and benefit_calc
-!sex = mod(ind_type,2)
-
 !----------------------
 !once the type is chosen, load data profiles for comparison: lfp, hours, assets and SS application timing
 !	1.allocate arrays
 !	data
-allocate(datalfp(tmom(cohort)))
-allocate(datahours(tmom(cohort)))
-allocate(datassets(tmom(cohort)))
-allocate(dataret(tmom(cohort)))
+allocate(datalfp(tmom(icoh)))
+allocate(datahours(tmom(icoh)))
+allocate(datassets(tmom(icoh)))
+allocate(dataret(tmom(icoh)))
+allocate(moments(3*tmom(icoh)))
 !	model
-allocate(modellfp(tmom(cohort)))
-allocate(modelhours(tmom(cohort)))
-allocate(modelassets(tmom(cohort)))
-allocate(modelret(tmom(cohort)))
+allocate(modellfp(tmom(icoh)))
+allocate(modelhours(tmom(icoh)))
+allocate(modelassets(tmom(icoh)))
+allocate(modelret(tmom(icoh)))
 !	2.load data
-write(datafile,'(a,i1.1,a)') "data_inputs/lfp_data_",ind_type,".csv"
+write(datafile,'(a,i1.1,a)') "data_inputs/lfp_data_",itype,".csv"
 call import_vector(datafile,datalfp)
-write(datafile,'(a,i1.1,a)') "data_inputs/hours_data_",ind_type,".csv"
+write(datafile,'(a,i1.1,a)') "data_inputs/hours_data_",itype,".csv"
 call import_vector(datafile,datahours)
-write(datafile,'(a,i1.1,a)') "data_inputs/assets_data_",ind_type,".csv"
+write(datafile,'(a,i1.1,a)') "data_inputs/assets_data_",itype,".csv"
 call import_vector(datafile,datassets)
 
 !----------------------
@@ -393,12 +418,12 @@ call import_vector(datafile,datassets)
 
 
 !Calculate stationary distribution of states at age 50 for that type
-call stationary_dist(transmat(:,:,1,ind_type),statvec)
+call stationary_dist(transmat(:,:,1,itype),statvec)
 call cumsum(statvec,cumstvec)
 !labor choice
 lchoice = -10
 !value function
-call valfun(cohort,wagegrid(:,:,ind_type),mexpgrid(:,:,:,ind_type),transmat(:,:,:,ind_type),surv(:,:,ind_type),ms, &
+call valfun(icoh,wagegrid(:,:,itype),mexpgrid(:,:,:,itype),transmat(:,:,:,itype),surv(:,:,itype),ms, &
 vf,vf_na,pf,pf_na,lchoice,lchoice_na,app_policy)
 
 !MAIN SIMULATION CYCLE
@@ -421,6 +446,18 @@ open(unit=16,file='data_output/app_age.txt',status='replace')
 
 counter = 0
 first = .TRUE.
+
+! initialize means
+
+mean_lifelabor 		= 0
+mean_lifeearnings 	= 0
+mean_lifewage 		= 0
+mean_lifemedexp 	= 0
+mean_lfp 			= 0
+nalive 				= 0
+nwork				= 0
+worker_wage			= 0
+mean_workerwage 	= 0
 
 do i = 1,nsim !simulate "nsim" individuals of given type
 	!First, make a draw to define jointly health status AND presence of assets
@@ -470,11 +507,33 @@ do i = 1,nsim !simulate "nsim" individuals of given type
 !		print *, 'pause'
 !	endif
 	
-	call lc_simulation(cohort,in_asset,in_aime,in_wage,in_mexp,in_health, init_workyears, wagegrid(:,:,ind_type), &
-				logwage(:,ind_type),wzmean(:,ind_type),wzsd(:,ind_type), wbinborders, &
-				mexpgrid(:,:,:,ind_type),logmexp(:,:,ind_type),mzmean(:,:,ind_type),mzsd(:,:,ind_type), mbinborders, &
-				ms, transmat(:,:,:,ind_type),vf,vf_na,pf,pf_na,lchoice,lchoice_na,app_policy, surv(:,:,ind_type), &
+	call lc_simulation(icoh,in_asset,in_aime,in_wage,in_mexp,in_health, init_workyears, wagegrid(:,:,itype), &
+				logwage(:,itype),wzmean(:,itype),wzsd(:,itype), wbinborders, &
+				mexpgrid(:,:,:,itype),logmexp(:,:,itype),mzmean(:,:,itype),mzsd(:,:,itype), mbinborders, &
+				ms, transmat(:,:,:,itype),vf,vf_na,pf,pf_na,lchoice,lchoice_na,app_policy, surv(:,:,itype), &
 				life_assets,life_labor,life_earnings, life_wage, life_medexp,app_age,tn_seed)
+	!construct individual lfp given life_labor: 0 means not participating, 1 is participating, -1 means dead
+	where (life_labor>0) 
+		life_lfp = 1
+		mean_lfp = mean_lfp + life_lfp
+		nwork = nwork + 1
+		worker_wage = life_wage
+		mean_workerwage = worker_wage + mean_workerwage
+	end where
+	!	find those who are alive in each age
+	! 	and sum up statistics for those alive
+	where (life_labor > -1) 
+		nalive = nalive + 1
+		mean_lifeearnings = mean_lifeearnings + life_earnings
+		mean_lifelabor = mean_lifelabor + life_labor
+		mean_lifemedexp = mean_lifemedexp + life_medexp
+		mean_lifewage = life_wage + mean_lifewage
+	end where
+	
+	where (life_assets > -1) mean_lifeassets = mean_lifeassets+life_assets
+	
+	
+	
 	!save the simulation results to .csv files
 	do j = 11,16 
 		call csv_write(j,i,.false.) !put the simulation number in the begining of the line, not advancing to next line
@@ -494,6 +553,20 @@ do i = 11,16
 	close(i)
 enddo
 
+!calculate means
+mean_lfp = mean_lfp/nalive
+mean_lifelabor = mean_lifelabor/nalive
+mean_lifeassets = mean_lifeassets/nalive
+mean_lifewage = mean_lifewage/nalive
+mean_workerwage = mean_workerwage/nwork
+
+
+if (icoh == 1) then
+	moments = (/datalfp - mean_lfp(8:lifespan),datahours-mean_lifelabor(8:lifespan),datassets - mean_lifeassets(8:lifespan)/)
+else
+	moments = (/datalfp - mean_lfp(1:18),datahours-mean_lifelabor(1:18),datassets - mean_lifeassets(1:18)/)
+endif
+
 !		END TESTING
 !-----------------------------------------------------------------------
 
@@ -502,6 +575,7 @@ deallocate(datalfp)
 deallocate(datahours)
 deallocate(datassets)
 deallocate(dataret)
+deallocate(moments)
 deallocate(modellfp)
 deallocate(modelhours)
 deallocate(modelassets)
@@ -944,7 +1018,7 @@ integer, dimension(grid_asset,statesize,grid_ss,lifespan,2), intent(in) :: pf_na
 real (kind = 8), dimension(grid_asset,statesize,grid_ss,lifespan,2), intent(in) :: app_policy
 real (kind = 8), dimension(lifespan,nhealth), intent(in) :: surv
 real (kind = 8), dimension(grid_asset,statesize,grid_ss,lifespan,2), intent(in) :: lchoice_na
-real (kind = 8), intent(out) :: life_assets(lifespan+1)
+real (kind = 8), intent(out) :: life_assets(lifespan)
 real (kind = 8), dimension(lifespan), intent(out) :: life_labor, life_earnings, life_wage, life_medexp
 integer, intent(out) :: app_age !the variable wil contain age of social security application
 integer, intent(inout) :: tn_seed
@@ -1396,8 +1470,6 @@ do t = 1,lifespan
 	acur = anext
 	
 enddo
-
-life_assets(t+1) = acur
 
 end subroutine lc_simulation
 
