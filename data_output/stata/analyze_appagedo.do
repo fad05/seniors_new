@@ -12,3 +12,4 @@ rename numret numret_eta2_8
 merge 1:1 ret_age using retirement.dta
 drop _merge
 save retirement.dta, replace
+exit, clear STATA

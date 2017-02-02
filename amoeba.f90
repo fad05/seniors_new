@@ -39,6 +39,7 @@ do
     y(ihi) = ytmp
     rtol = 2.0_sp*abs(y(ihi)-y(ilo))/(abs(y(ihi))+abs(y(ilo))+TINY)
     print *,'rtol =', rtol
+    print *, 'abs error value:', abs(y(ilo))
     if (rtol<ftol) then
         call swap(y(1),y(ilo))
         call swap(p(1,:),p(ilo,:))
