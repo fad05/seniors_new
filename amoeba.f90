@@ -37,9 +37,11 @@ do
     y(ihi) = y(ilo)
     inhi = imaxloc(y(:))
     y(ihi) = ytmp
-    rtol = 2.0_sp*abs(y(ihi)-y(ilo))/(abs(y(ihi))+abs(y(ilo))+TINY)
+    !rtol = 2.0_sp*abs(y(ihi)-y(ilo))/(abs(y(ihi))+abs(y(ilo))+TINY)
+    rtol = abs(y(ilo))
     print *,'rtol =', rtol
     print *, 'abs error value:', abs(y(ilo))
+    print *, 'parameter values:', p(ilo,:)
     if (rtol<ftol) then
         call swap(y(1),y(ilo))
         call swap(p(1,:),p(ilo,:))

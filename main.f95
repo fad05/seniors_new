@@ -185,7 +185,7 @@ real (kind = 8) joint_awma(4,14)				!4 = male/femele * college/noncollege; 14 = 
 !Variables containing data moments
 real (kind = 8), dimension(:), allocatable ::	datalfp, datahours, datassets, dataret
 real (kind = 8), dimension(:), allocatable ::	modellfp, modelhours, modelassets, modelret
-real (kind = 8), dimension(:), allocatable ::	moments
+real (kind = 8), dimension(:,:), allocatable ::	moments
 
 !Miscellaneous varables
 real (kind = 8) ssr, conv_crit
@@ -196,14 +196,16 @@ real (kind = 8) ssr, conv_crit
 
 !	Initialize structural parameters
 !	ltot kappa d cmin beta delta eta sigma ugamma xi nu
-structparams = (/3.8d3, 9.0d2, 1.0d5, 2.6d3, 0.95d0, 0.2d0,  1.8d0, 3.75d0, 0.5d0, 1.4d0, 2.0d0/)
-
+structparams = (/4.0d3, 9.0d2, 1.0d5, 2.6d3, 0.95d0, 0.2d0,  1.8d0, 1.75d0, 0.3d0, 1.4d0, 2.0d0/)
+!read (*,*)
+! 3374.4555795698461        86.194487031944561        101734.14793624758        2654.3519319631678       0.95677131246376546        3.9021084310270213        1.7735066292457966        3.8524920824400750       0.48252660419301929        1.5048156043037637        2.3074137504235575
+! 3422.7614125473388        90.424833289966003        94083.344106150122        2645.7239564145216       0.96484433579118623        411.46360914032579        1.8075817844161797        3.8168053402943602       0.47786769957138442        1.4114128124903127        2.2770915262383440
 ltot 	= structparams(1)
 kappa 	= structparams(2)
 d 		= structparams(3)
 cmin 	= structparams(4)
 beta 	= structparams(5)
-delta 	= structparams(6)
+delta	= structparams(6)
 eta 	= structparams(7)
 sigma 	= structparams(8)
 ugamma 	= structparams(9)
@@ -334,7 +336,7 @@ do i = 1,ntypes
 !	logwage(11:26,i) = lwagetemp(:,i)
 !	logwage(27:lifespan,i) = 0.0d0
 
-!	logwage(:,i) = 0.5*logwage(:,i)
+!	logwage(:,i) = 0.2*logwage(:,i)
 
 !	End of temporary code
 
@@ -417,7 +419,7 @@ allocate(datalfp(tmom(icoh)))
 allocate(datahours(tmom(icoh)))
 allocate(datassets(tmom(icoh)))
 allocate(dataret(tmom(icoh)))
-allocate(moments(3*tmom(icoh)))
+allocate(moments(3*tmom(icoh),1))
 !	model
 allocate(modellfp(tmom(icoh)))
 allocate(modelhours(tmom(icoh)))
@@ -488,7 +490,8 @@ do while (conv_crit>10*tol)
 	!	1. Correct for wage selection bias correction
     !	1.1. Solve for wage update
     call moment_wage_calc(structparams, ssr, delta_wage)
-        
+    
+    !call execute_command_line ("cd data_output/stata && stata simulwage_update.do && cd ../..")  
     !	1.2. Сonstructing new wage grid aroud updated logwage
     !THIS IS NOT A PERFECT WAY TO CONSTRUCT THE UPDATED WAGE GRID
     !I NEED TO SYNCHRONIZE THIS WITH STATA: get updated wzmean and wzsd using exactly the same procedures I use in stata
@@ -500,7 +503,10 @@ do while (conv_crit>10*tol)
 			wagegrid(t,k,icoh) = exp(log(updated_wage(t))	+	bin_mean)
 		enddo
 	enddo
-
+	
+!	initial_wage = updated_wage
+!	conv_crit = sum(sqrt(delta_wage**2))
+!enddo
 !	2.	Feed the updated profiles to the model and calculate set of parameters that minimizes moment conditons.
 !I use updated wage grid it to calibrate parameters: so far, to fit lfp, labor supply and assets. Amoeba procedure.
 !I put no weight on assets moment for now, since the differences are huge.
@@ -510,6 +516,7 @@ do while (conv_crit>10*tol)
 	print *, 'Total number of simplex vectors:', nparams+1
 	spsimplex(1,:) = structparams
 	funevals(1) = mom_calc(structparams)
+!	!$OMP PARALLEL DO
 	do n = 1,nparams
 		print *, 'Simplex vectot number', n+1
 		y = structparams
@@ -521,6 +528,7 @@ do while (conv_crit>10*tol)
 		spsimplex(n+1,:) = y
 		funevals(n+1) = mom_calc(y)
 	enddo
+!	!$OMP END PARALLEL DO
 	!Solving for minimal ssr
 	call amoeba(spsimplex,funevals,tol,mom_calc,iter,info)
 	!update structural parameters: choose one of the simplex values
@@ -560,8 +568,8 @@ contains
 		real (DP), dimension(:), allocatable :: stp
 
 !		Local var
-		real (kind = 8), dimension(:,:), allocatable :: weightmat
-
+		real (kind = 8), dimension(:,:), allocatable :: multmat, weightmat
+		real (kind = 8) mn(1,1)
 
 
 	!	BODY OF FUNCTION
@@ -726,13 +734,18 @@ contains
 		
 		!calculate difference between data and model moments
 		if (icoh == 1) then
-			moments = (/datalfp - mean_lfp(8:lifespan),datahours-mean_lifelabor(8:lifespan),datassets - mean_lifeassets(8:lifespan)/)
+			moments(:,1) = (/datalfp - mean_lfp(8:lifespan),(datahours-mean_lifelabor(8:lifespan))/1000, &
+			(datassets - mean_lifeassets(8:lifespan))/100000/)
 		else
-			moments = (/datalfp - mean_lfp(1:18),datahours-mean_lifelabor(1:18),datassets - mean_lifeassets(1:18)/)
+			moments(:,1) = (/datalfp - mean_lfp(1:18),(datahours-mean_lifelabor(1:18))/1000, &
+			(datassets - mean_lifeassets(1:18))/100000/)
 		endif
 		
 		!allocate moments' weight
-		allocate(weightmat(3*tmom(icoh),3*tmom(icoh)))	
+		!allocate(multmat(3*tmom(icoh),3*tmom(icoh)))
+		allocate(weightmat(3*tmom(icoh),3*tmom(icoh)))		
+		!multmat = matmul(moments,transpose(moments))
+		!call inverse(multmat,weightmat,3*tmom(icoh))
 		weightmat = 0.0d0
 		do i = 1,2*tmom(icoh)
 			weightmat(i,i) = 1.0d0
@@ -745,7 +758,9 @@ contains
 !			endif
 !		enddo
 		
-		momnorm = dot_product(matmul(moments,weightmat),moments)
+		mn = matmul(matmul(transpose(moments),weightmat),moments)
+		momnorm = mn(1,1)
+		!deallocate(multmat)
 		deallocate(weightmat)
 	end subroutine moment_wage_calc
 

@@ -5,6 +5,7 @@ module parameters
 	real (kind = 8)		::	xi, nu
 	integer, parameter  ::	nparams = 11 !total number of calibraton parameters
 	integer, parameter 	:: 	age0 = 50
+	real (kind = 8)		::	phi !hours of leisure lost due to bad health
 
 !	real (kind = 8)		::	ltot = 3.8d3, kappa = 9.0d2, d = 1.0d5, cmin = 2.6d3, age0 = 5.0d1
 !	real (kind = 8)		::	beta = 0.95d0,	delta = 0.2d0, eta = 1.8d0, sigma = 3.75d0, ugamma = 0.5d0
@@ -13,12 +14,12 @@ module parameters
     integer, parameter :: grid_asset = 11, grid_ss = 11 ,nwagebins = 5, nmedbins = 5, ntypes = 8, nhealth = 2
     integer, parameter :: lifespan = 41, hmin = 0
     integer, parameter :: statesize = nwagebins*nmedbins*nhealth
-    integer, parameter :: nsim = 3000 !number of simulations
+    integer, parameter :: nsim = 1000 !number of simulations
     integer, parameter :: tmom(2) = (/34, 18/) !number of periods available for method of simulated moments: 34 periods (57 to 90) for c-0, 18 periods (50 to 67) for c-1
     integer, parameter :: init_workyears = 25	
     									
 
-    real (kind = 8), parameter :: 	tol = 1.0d-6, asset_min = 1.0d3, asset_max = 5.0d5, r = 2.0d-2
+    real (kind = 8), parameter :: 	tol = 1.0d-3, asset_min = 1.0d3, asset_max = 5.0d5, r = 2.0d-2
     
     !inflation adjustment : http://data.bls.gov/cgi-bin/cpicalc.pl
     !I calculate cap in the following way: calculate PIA at NRA taking base income from the table and increase PIA actuarially until age 70

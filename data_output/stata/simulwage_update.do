@@ -2,7 +2,7 @@
 *The difference is, I use model generated data here.
 clear all
 set more off
-cd "/media/alex/Storage/Documents/Projects/Ageing and Education/fortran_code/seniors_new/data_output/stata"
+*cd "/media/alex/Storage/Documents/Projects/Ageing and Education/fortran_code/seniors_new/data_output/stata"
 import delimited "../life_wage.txt", clear 
 mvdecode v*, mv(-1)
 *transpose the data
@@ -34,7 +34,7 @@ predict zimean_pred
 preserve
 collapse logwagepred zimean_pred zisd_pred, by(age)
 *Store counterfactual smoothed profile
-export delimited logwagepred zimean_pred zisd_pred using "/media/alex/Storage/Documents/Projects/Ageing and Education/fortran_code/seniors_new/data_inputs/lwage_smooth_simul.csv", nolabel replace
+export delimited logwagepred zimean_pred zisd_pred using "../../data_inputs/lwage_smooth_simul.csv", nolabel replace
 restore
 
 *Now, update the residuals.
@@ -58,14 +58,13 @@ forvalues i = 1/6 {
 	reg b`i' age
 	predict bpred`i'	
 }
-export delimited bpred? using "/media/alex/Storage/Documents/Projects/Ageing and Education/fortran_code/seniors_new/data_inputs/wagebin_borders_smooth_simul.csv", delimiter(";") nolabel replace 
+export delimited bpred? using "../../data_inputs/wagebin_borders_smooth_simul.csv", delimiter(";") nolabel replace 
 restore
 
 *wage shock transitions
 sort pid age
 gen zibin_next = zi_bin[_n+1]
 gen delta_age = age[_n+1] - age[_n]
-	*dropping last observation for each person; the information is still contained in healthy_next
 by pid: gen numobs = _n
 by pid: egen maxnumobs = max(numobs)
 drop if numobs == maxnumobs
@@ -74,10 +73,11 @@ drop numobs maxnumobs
 mlogit zibin_next zi_bin age, base(3)
 predict zn1 zn2 zn3 zn4 zn5
 sort zi_bin age zibin_next
-*twoway (line zn1 age if zi_bin == 2 & zibin_next == 1)(line zn2 age if zi_bin == 2 & zibin_next == 2)(line zn3 age if zi_bin == 2 & zibin_next == 3)(line zn4 age if zi_bin == 2 & zibin_next == 4)(line zn5 age if zi_bin == 2 & zibin_next == 5)
+*twoway (line zn1 age if zi_bin == 5 & zibin_next == 1)(line zn2 age if zi_bin == 5 & zibin_next == 2)(line zn3 age if zi_bin == 5 & zibin_next == 3)(line zn4 age if zi_bin == 5 & zibin_next == 4)(line zn5 age if zi_bin == 5 & zibin_next == 5)
 *sort age zi_bin zibin_next
 drop if zi_bin == . | zibin_next == .
 collapse zn?, by(age zi_bin)
 
-export delimited zn1 zn2 zn3 zn4 zn5 using "/media/alex/Storage/Documents/Projects/Ageing and Education/fortran_code/seniors_new/data_inputs/transmat_wage_simul.csv", delimiter(";") nolabel novarnames replace
+export delimited zn1 zn2 zn3 zn4 zn5 using "../../data_inputs/transmat_wage_simul.csv", delimiter(";") nolabel novarnames replace
+
 exit, clear STATA
