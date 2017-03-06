@@ -3,7 +3,8 @@ module parameters
 	real (kind = 8)		::	ltot, kappa, d, cmin
 	real (kind = 8)		::	beta, delta, eta, sigma, ugamma
 	real (kind = 8)		::	xi, nu
-	integer, parameter  ::	nparams = 11 !total number of calibraton parameters
+	real (kind = 8)		::	lgamma, cgamma
+	integer, parameter  ::	nparams = 11, nparams_cd = 12, nparams_pc1 = 12 !total number of calibraton parameters
 	integer, parameter 	:: 	age0 = 50
 	real (kind = 8)		::	phi !hours of leisure lost due to bad health
 
@@ -16,7 +17,7 @@ module parameters
     integer, parameter :: statesize = nwagebins*nmedbins*nhealth
     integer, parameter :: nsim = 1000 !number of simulations
     integer, parameter :: tmom(2) = (/34, 18/) !number of periods available for method of simulated moments: 34 periods (57 to 90) for c-0, 18 periods (50 to 67) for c-1
-    integer, parameter :: init_workyears = 25	
+    integer, parameter :: init_workyears = 30	
     									
 
     real (kind = 8), parameter :: 	tol = 1.0d-3, asset_min = 1.0d3, asset_max = 5.0d5, r = 2.0d-2

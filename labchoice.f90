@@ -198,14 +198,17 @@ return !end of subroutine
 			else !labor is larger than zero; the changes are in utility functon: notice KAPPA and XI there
 				if (anxt == 0) then !next-period assets are zero: agent is eligible for minimal consumption level					
 					if (cns > cmin_scaled) then
-						utl = ((1+delta*(h-1))*(cns**ugamma*(ltot_scaled-lbr-kappa_scaled-xi_scaled*(age-age0)**nu)**(1-ugamma))**(1-sigma))/(1-sigma) 
+						utl = ((1+delta*(h-1))*(cns**ugamma*(ltot_scaled-lbr-kappa_scaled-xi_scaled*(age-age0)**nu) &
+						**(1-ugamma))**(1-sigma))/(1-sigma) 
 					else
 						cns = cmin_scaled !consumption floor
-						utl = ((1+delta*(h-1))*(cns**ugamma*(ltot_scaled-lbr-kappa_scaled-xi_scaled*(age-age0)**nu)**(1-ugamma))**(1-sigma))/(1-sigma)
+						utl = ((1+delta*(h-1))*(cns**ugamma*(ltot_scaled-lbr-kappa_scaled-xi_scaled*(age-age0)**nu) &
+						**(1-ugamma))**(1-sigma))/(1-sigma)
 					endif
 				else 
 					if (cns > 0) then
-						utl = ((1+delta*(h-1))*(cns**ugamma*(ltot_scaled-lbr-kappa_scaled-xi_scaled*(age-age0)**nu)**(1-ugamma))**(1-sigma))/(1-sigma)
+						utl = ((1+delta*(h-1))*(cns**ugamma*(ltot_scaled-lbr-kappa_scaled-xi_scaled*(age-age0)**nu) &
+						**(1-ugamma))**(1-sigma))/(1-sigma)
 					else
 						utl = -1.0d5
 					endif	

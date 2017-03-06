@@ -1,7 +1,7 @@
 clear all
 set more off
 cd "/media/alex/Storage/Documents/Projects/Ageing and Education/fortran_code/seniors_new/data_output/stata"
-local name "life_assets"
+local name "life_assets_pcost1"
 import delimited "../`name'.txt", clear 
 *change all (-1) values (values for dead) to missing
 mvdecode v*, mv(-1)

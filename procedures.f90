@@ -259,7 +259,11 @@ use parameters
 real (kind = 8), dimension(grid_asset), intent(in) :: assets
 real (kind = 8), dimension(grid_asset), intent(out) :: beq
 
-beq = eta*((assets+d)/scale_factor)**(1-sigma)/(1-sigma) !notice scale factor here
+where ((assets+d) > 0)
+	beq = eta*((assets+d)/scale_factor)**(1-sigma)/(1-sigma) !notice scale factor here
+elsewhere
+	beq = -1.0d5
+endwhere
 end subroutine bequest_value
 
 function distance2d(x1,y1,x2,y2)
@@ -593,5 +597,30 @@ do k=1,n
   b(k)=0.0
 end do
 end subroutine inverse
+
+function polynom(coefs,x,n)
+implicit none
+real (kind = 8) :: polynom
+real (kind = 8), dimension(:), intent(in) :: coefs !vector of coefficients, from power 0 to power n (n+1 coefficients in total)
+real (kind = 8), intent(in) :: x !point of evaluation of polynomial
+integer, intent(in) :: n
+
+integer i
+
+
+if (size(coefs) /= n+1) then
+	!Error message
+	print *, 'Incorrect size of coefficient vector! Press any button.'
+	read (*,*)
+	stop
+endif
+
+polynom = 0.0d0
+
+do i = 0,n
+	polynom = polynom + coefs(i+1)*x**i
+enddo
+
+end function polynom
 
 end module procedures

@@ -1,5 +1,5 @@
 cd "/media/alex/Storage/Documents/Projects/Ageing and Education/fortran_code/seniors_new/data_output/stata"
-import delimited "../app_age.txt", clear 
+import delimited "../app_age_cd.txt", clear 
 *change all (-1) values (values for dead) to missing
 mvdecode v*, mv(-1)
 rename v2 ret_age

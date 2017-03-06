@@ -90,10 +90,10 @@ end interface
 !PROGRAM VARIABLES
 
 !	1.
-real (kind = 8) structparams(nparams), spsimplex(nparams+1,nparams) !STRUCTURAL PARAMETERS OF THE MODEL, THE ONES TO BE CALIBRATED; and corresponding simplex for Nelder-Mead algorithm
-!	The parameters are:	ltot kappa d cmin beta delta eta sigma ugamma xi nu
-real (kind = 8) y(nparams), funevals(nparams+1)
-real (kind = 8), parameter :: usual_delta =  0.05, zero_term_delta =  0.00025
+real (kind = 8) structparams(nparams_cd), spsimplex(nparams_cd+1,nparams_cd) !STRUCTURAL PARAMETERS OF THE MODEL, THE ONES TO BE CALIBRATED; and corresponding simplex for Nelder-Mead algorithm
+!	The parameters are:	ltot kappa d cmin beta delta eta sigma cgamma lgamma xi nu
+real (kind = 8) y(nparams_cd), funevals(nparams_cd+1)
+real (kind = 8), parameter :: usual_delta =  0.1, zero_term_delta =  0.025
 integer iter, info
 
 !	2.
@@ -147,7 +147,8 @@ real (kind = 8), dimension(grid_asset,statesize,grid_ss,lifespan,2) :: lchoice_n
 !results of simulation: single simulation and averaged over "nsim" simulations
 real (kind = 8)  life_assets(lifespan), mean_lifeassets(lifespan)
 real (kind = 8), dimension(lifespan) :: life_labor, life_earnings, life_wage, life_medexp, life_lfp, worker_wage
-real (kind = 8), dimension(lifespan) :: mean_lifelabor, mean_lifeearnings, mean_lifewage, mean_lifemedexp, mean_lfp, mean_workerwage
+real (kind = 8), dimension(lifespan) :: mean_lifelabor,mean_lifeearnings,mean_lifewage,mean_lifemedexp,mean_lfp,mean_workerwage, &
+										mean_applied
 real (kind = 8), dimension(lifespan) :: delta_wage, initial_wage, updated_wage, upd_logwage
 integer, 		 dimension(lifespan) :: nalive, nwork !for every age, number of individuals alive at that period (to average properly) and no of indivs who work
 integer app_age
@@ -185,7 +186,7 @@ real (kind = 8) joint_awma(4,14)				!4 = male/femele * college/noncollege; 14 = 
 !Variables containing data moments
 real (kind = 8), dimension(:), allocatable ::	datalfp, datahours, datassets, dataret
 real (kind = 8), dimension(:), allocatable ::	modellfp, modelhours, modelassets, modelret
-real (kind = 8), dimension(:), allocatable ::	moments
+real (kind = 8), dimension(:,:), allocatable ::	moments
 
 !Miscellaneous varables
 real (kind = 8) ssr, conv_crit
@@ -194,21 +195,26 @@ real (kind = 8) ssr, conv_crit
 
 !PROGRAM BODY
 
+
 !	Initialize structural parameters
-!	ltot kappa d cmin beta delta eta sigma ugamma xi nu
-structparams = (/3.8d3, 0.9d2, 1.0d5, 2.6d3, 0.95d0, 0.2d0,  1.8d0, 1.75d0, 0.8d0, 1.4d0, 2.0d0/)
+!	ltot kappa d cmin beta delta eta sigma cgamma lgamma xi nu
+structparams = (/4.8d3, 9.0d2, 1.0d5, 2.6d3, 0.95d0, 0.2d0,  1.8d0, 1.75d0, 0.3d0, 0.5d0, 1.4d0, 2.0d0/)
+!structparams = (/3.8d0,870.07d0, 98691.4d0, 2584.5d0, 0.98d0, 0.2d0, 1.8d0, 1.78d0,  0.31d0,  0.39d0,1.9d0, 1.5d0/)
+!read (*,*)
+!parameter values:   4329.5102084019554        870.07494196261041        98691.438175558287        2584.4577746812288       0.98089214831123517       0.19956086722606781        1.7998490549485420        1.7784006858736456       0.30618202318229315       0.38606688813185541        1.3594207172878821        1.9883658329442573
 
 ltot 	= structparams(1)
 kappa 	= structparams(2)
 d 		= structparams(3)
 cmin 	= structparams(4)
 beta 	= structparams(5)
-delta 	= structparams(6)
+delta	= structparams(6)
 eta 	= structparams(7)
 sigma 	= structparams(8)
-ugamma 	= structparams(9)
-xi 		= structparams(10)
-nu 		= structparams(11)
+cgamma 	= structparams(9)
+lgamma 	= structparams(10)
+xi 		= structparams(11)
+nu 		= structparams(12)
 
 ! Pick a type between 1 and 8, and calculate optimal labor choice matrix and value function for a chosen type (choice have been made in the beginning)
 !user inputs the type
@@ -417,7 +423,7 @@ allocate(datalfp(tmom(icoh)))
 allocate(datahours(tmom(icoh)))
 allocate(datassets(tmom(icoh)))
 allocate(dataret(tmom(icoh)))
-allocate(moments(3*tmom(icoh)))
+allocate(moments(3*tmom(icoh),1))
 !	model
 allocate(modellfp(tmom(icoh)))
 allocate(modelhours(tmom(icoh)))
@@ -430,6 +436,8 @@ write(datafile,'(a,i1.1,a)') "data_inputs/hours_data_",itype,".csv"
 call import_vector(datafile,datahours)
 write(datafile,'(a,i1.1,a)') "data_inputs/assets_data_",itype,".csv"
 call import_vector(datafile,datassets)
+write(datafile,'(a,i1.1,a)') "data_inputs/applied_",itype,".csv"
+call import_vector(datafile,dataret)
 
 !----------------------
 
@@ -488,7 +496,8 @@ do while (conv_crit>10*tol)
 	!	1. Correct for wage selection bias correction
     !	1.1. Solve for wage update
     call moment_wage_calc(structparams, ssr, delta_wage)
-        
+    
+    !call execute_command_line ("cd data_output/stata && stata simulwage_update.do && cd ../..")  
     !	1.2. Сonstructing new wage grid aroud updated logwage
     !THIS IS NOT A PERFECT WAY TO CONSTRUCT THE UPDATED WAGE GRID
     !I NEED TO SYNCHRONIZE THIS WITH STATA: get updated wzmean and wzsd using exactly the same procedures I use in stata
@@ -501,39 +510,41 @@ do while (conv_crit>10*tol)
 		enddo
 	enddo
 	
-	initial_wage = updated_wage
-	conv_crit = sum(sqrt(delta_wage**2))
-enddo
-!!	2.	Feed the updated profiles to the model and calculate set of parameters that minimizes moment conditons.
-!!I use updated wage grid it to calibrate parameters: so far, to fit lfp, labor supply and assets. Amoeba procedure.
-!!I put no weight on assets moment for now, since the differences are huge.
-
-
-!	!Construct initial simplex to feed into 'amoeba' procedure; algorithm is borrowed from Matlab "fminsearch"
-!	print *, 'Total number of simplex vectors:', nparams+1
-!	spsimplex(1,:) = structparams
-!	funevals(1) = mom_calc(structparams)
-!	do n = 1,nparams
-!		print *, 'Simplex vectot number', n+1
-!		y = structparams
-!		if (y(n) /= 0.) then
-!			y(n) = (1+usual_delta)*y(n)
-!		else
-!			y(n) = zero_term_delta
-!		endif
-!		spsimplex(n+1,:) = y
-!		funevals(n+1) = mom_calc(y)
-!	enddo
-!	!Solving for minimal ssr
-!	call amoeba(spsimplex,funevals,tol,mom_calc,iter,info)
-!	!update structural parameters: choose one of the simplex values
-!	structparams = spsimplex(1,:)
-
 !	initial_wage = updated_wage
-	
 !	conv_crit = sum(sqrt(delta_wage**2))
-!	print *, 'convergence criterion', conv_crit
 !enddo
+!	2.	Feed the updated profiles to the model and calculate set of parameters that minimizes moment conditons.
+!I use updated wage grid it to calibrate parameters: so far, to fit lfp, labor supply and assets. Amoeba procedure.
+!I put no weight on assets moment for now, since the differences are huge.
+
+
+	!Construct initial simplex to feed into 'amoeba' procedure; algorithm is borrowed from Matlab "fminsearch"
+	print *, 'Total number of simplex vectors:', nparams_cd+1
+	spsimplex(1,:) = structparams
+	funevals(1) = mom_calc(structparams)
+!	!$OMP PARALLEL DO
+	do n = 1,nparams_cd
+		print *, 'Simplex vectot number', n+1
+		y = structparams
+		if (y(n) /= 0.) then
+			y(n) = (1+usual_delta)*y(n)
+		else
+			y(n) = zero_term_delta
+		endif
+		spsimplex(n+1,:) = y
+		funevals(n+1) = mom_calc(y)
+	enddo
+!	!$OMP END PARALLEL DO
+	!Solving for minimal ssr
+	call amoeba(spsimplex,funevals,tol,mom_calc,iter,info)
+	!update structural parameters: choose one of the simplex values
+	structparams = spsimplex(1,:)
+
+	initial_wage = updated_wage
+	
+	conv_crit = sum(sqrt((initial_wage - updated_wage)**2))
+	print *, 'convergence criterion', conv_crit
+enddo
 
 !		END TESTING
 !-----------------------------------------------------------------------
@@ -551,6 +562,8 @@ deallocate(modelret)
 
 
 contains
+	subroutine inputs
+	end subroutine inputs
 	subroutine moment_wage_calc(strpar, momnorm, dwage)
 	!	Function takes a vector of structural parameters ("strpar") and spits out norm of moment conditions as a function result.
 		use parameters
@@ -563,8 +576,8 @@ contains
 		real (DP), dimension(:), allocatable :: stp
 
 !		Local var
-		real (kind = 8), dimension(:,:), allocatable :: weightmat
-
+		real (kind = 8), dimension(:,:), allocatable :: multmat, weightmat
+		real (kind = 8) mn(1,1)
 
 
 	!	BODY OF FUNCTION
@@ -579,24 +592,26 @@ contains
 		delta 	= stp(6)
 		eta 	= stp(7)
 		sigma 	= stp(8)
-		ugamma 	= stp(9)
-		xi 		= stp(10)
-		nu 		= stp(11)
+		cgamma 	= stp(9)
+		lgamma 	= stp(10)
+		xi 		= stp(11)
+		nu 		= stp(12)
 
 	!	2. Calculate value function given these parameters
 		!labor choice
 		lchoice = -10
+		lchoice_na = -20
 		!value function
 		call valfun(icoh,wagegrid(:,:,itype),mexpgrid(:,:,:,itype),transmat(:,:,:,itype),surv(:,:,itype),ms, &
 		vf,vf_na,pf,pf_na,lchoice,lchoice_na,app_policy)
 
 		!open files to save results
-		open(unit=11,file='data_output/life_assets.txt',status='replace')
-		open(unit=12,file='data_output/life_labor.txt',status='replace')
-		open(unit=13,file='data_output/life_earnings.txt',status='replace')
-		open(unit=14,file='data_output/life_wage.txt',status='replace')
-		open(unit=15,file='data_output/life_medexp.txt',status='replace')
-		open(unit=16,file='data_output/app_age.txt',status='replace')
+		open(unit=11,file='data_output/life_assets_cd.txt',status='replace')
+		open(unit=12,file='data_output/life_labor_cd.txt',status='replace')
+		open(unit=13,file='data_output/life_earnings_cd.txt',status='replace')
+		open(unit=14,file='data_output/life_wage_cd.txt',status='replace')
+		open(unit=15,file='data_output/life_medexp_cd.txt',status='replace')
+		open(unit=16,file='data_output/app_age_cd.txt',status='replace')
 
 		counter = 0
 		first = .TRUE.
@@ -608,6 +623,7 @@ contains
 		mean_lifewage 		= 0
 		mean_lifemedexp 	= 0
 		mean_lfp 			= 0
+		mean_applied		= 0
 		nalive 				= 0
 		nwork				= 0
 		worker_wage			= 0
@@ -666,6 +682,10 @@ contains
 						mexpgrid(:,:,:,itype),logmexp(:,:,itype),mzmean(:,:,itype),mzsd(:,:,itype), mbinborders, &
 						ms, transmat(:,:,:,itype),vf,vf_na,pf,pf_na,lchoice,lchoice_na,app_policy, surv(:,:,itype), &
 						life_assets,life_labor,life_earnings, life_wage, life_medexp,app_age,tn_seed)
+			!construct a vector of number of ss applications at a given age
+			if (app_age > 0) then
+				mean_applied(app_age-49) = mean_applied(app_age-49) + 1
+			endif
 			!construct individual lfp given life_labor: 0 means not participating, 1 is participating, -1 means dead
 			where (life_labor>0)
 				life_lfp = 1
@@ -711,6 +731,7 @@ contains
 		mean_lfp = mean_lfp/nalive
 		mean_lifelabor = mean_lifelabor/nalive
 		mean_lifeassets = mean_lifeassets/nalive
+		mean_applied = mean_applied/nalive
 		where (nwork > 0)
 			mean_lifewage = mean_lifewage/nalive
 			mean_workerwage = mean_workerwage/nwork
@@ -729,13 +750,18 @@ contains
 		
 		!calculate difference between data and model moments
 		if (icoh == 1) then
-			moments = (/datalfp - mean_lfp(8:lifespan),datahours-mean_lifelabor(8:lifespan),datassets - mean_lifeassets(8:lifespan)/)
+			moments(:,1) = (/datalfp - mean_lfp(8:lifespan),(datahours-mean_lifelabor(8:lifespan))/1000, &
+			(datassets - mean_lifeassets(8:lifespan))/100000/)
 		else
-			moments = (/datalfp - mean_lfp(1:18),datahours-mean_lifelabor(1:18),datassets - mean_lifeassets(1:18)/)
+			moments(:,1) = (/datalfp - mean_lfp(1:18),(datahours-mean_lifelabor(1:18))/1000, &
+			(datassets - mean_lifeassets(1:18))/100000/)
 		endif
 		
 		!allocate moments' weight
-		allocate(weightmat(3*tmom(icoh),3*tmom(icoh)))	
+		!allocate(multmat(3*tmom(icoh),3*tmom(icoh)))
+		allocate(weightmat(3*tmom(icoh),3*tmom(icoh)))		
+		!multmat = matmul(moments,transpose(moments))
+		!call inverse(multmat,weightmat,3*tmom(icoh))
 		weightmat = 0.0d0
 		do i = 1,2*tmom(icoh)
 			weightmat(i,i) = 1.0d0
@@ -748,7 +774,9 @@ contains
 !			endif
 !		enddo
 		
-		momnorm = dot_product(matmul(moments,weightmat),moments)
+		mn = matmul(matmul(transpose(moments),weightmat),moments)
+		momnorm = mn(1,1)
+		!deallocate(multmat)
 		deallocate(weightmat)
 	end subroutine moment_wage_calc
 
@@ -1074,6 +1102,9 @@ subroutine valfun(cohort,wage,medexp,transmat,surv,ms,vf,vf_na,pf,pf_na,lchoice,
 		!bcalc = 2: calculate bnext as if an individual has more than 35 working years
 		do t = lifespan-1,1,-1 !age 89 to 50
 			age = t+49 !real age
+			if (age == 58) then
+				print *, 58
+			endif
 			do k = 1,grid_ss
 				do s = 1,statesize !for every possible state
 					!here, determine wage, med and health shock corresponding to the current state
@@ -1242,6 +1273,7 @@ real (kind = 8) an0000,an0001,an0010,an0011,an0100,an0101,an0110,an0111, &
 				an1000,an1001,an1010,an1011,an1100,an1101,an1110,an1111
 real (kind = 8) ln0000,ln0001,ln0010,ln0011,ln0100,ln0101,ln0110,ln0111, &
 				ln1000,ln1001,ln1010,ln1011,ln1100,ln1101,ln1110,ln1111
+real (kind = 8) :: lmin = 5.0d3, lnmin = 5.0d3
 !Corresponding state values in s-space
 integer state00, state01,state10,state11
 
@@ -1368,6 +1400,10 @@ do t = 1,lifespan
 	!	16 value functions v0000 to v1111
 	!	and 16 vf_na: vn0000 to vn1111
 
+	!	Also, among the values of labor supply, I look for the smallest nonzero number. That is, a very cheap way to avoid interpolation error,
+	!	which produces small positive annual hours. This smallest nonzero number will serve as a treshold: interpolated value either zero or larger than this 
+	!	smallest number.
+
 	!states (0,0) -> (iwprev,imprev); (1,1) -> (iwnext,imnext)
 	state00 = h+nhealth*(imprev-1)+nmedbins*nhealth*(iwprev-1)
 	state01 = h+nhealth*(imnext-1)+nmedbins*nhealth*(iwprev-1)
@@ -1380,6 +1416,12 @@ do t = 1,lifespan
 	an0000 	= assets(pf_na	(iaprev,state00,ibprev,t,bcalc))
 	l0000 	= lchoice		(iaprev,state00,ibprev,t)
 	ln0000 	= lchoice_na	(iaprev,state00,ibprev,t,bcalc)
+	if (l0000 < lmin .AND. l0000>0) then 
+		lmin = l0000
+	endif
+	if (ln0000 < lnmin .AND. ln0000>0) then 
+		lnmin = ln0000
+	endif
 		!0001
 	v0001 	= vf			(iaprev,state00,ibnext,t)
 	vn0001 	= vf_na			(iaprev,state00,ibnext,t,bcalc)
@@ -1387,6 +1429,12 @@ do t = 1,lifespan
 	an0001 	= assets(pf_na	(iaprev,state00,ibnext,t,bcalc))
 	l0001 	= lchoice		(iaprev,state00,ibnext,t)
 	ln0001 	= lchoice_na	(iaprev,state00,ibnext,t,bcalc)
+	if (l0001 < lmin .AND. l0001>0) then 
+		lmin = l0001
+	endif
+	if (ln0001 < lnmin .AND. ln0001>0) then 
+		lnmin = ln0001
+	endif
 		!0010
 	v0010	= vf			(iaprev,state01,ibprev,t)
 	vn0010	= vf_na			(iaprev,state01,ibprev,t,bcalc)
@@ -1394,6 +1442,12 @@ do t = 1,lifespan
 	an0010 	= assets(pf_na	(iaprev,state01,ibprev,t,bcalc))
 	l0010 	= lchoice		(iaprev,state01,ibprev,t)
 	ln0010 	= lchoice_na	(iaprev,state01,ibprev,t,bcalc)
+	if (l0010 < lmin .AND. l0010>0) then 
+		lmin = l0010
+	endif
+	if (ln0010 < lnmin .AND. ln0010>0) then 
+		lnmin = ln0010
+	endif
 		!0011
 	v0011	= vf			(iaprev,state01,ibnext,t)
 	vn0011	= vf_na			(iaprev,state01,ibnext,t,bcalc)
@@ -1401,6 +1455,12 @@ do t = 1,lifespan
 	an0011 	= assets(pf_na	(iaprev,state01,ibnext,t,bcalc))
 	l0011 	= lchoice		(iaprev,state01,ibnext,t)
 	ln0011 	= lchoice_na	(iaprev,state01,ibnext,t,bcalc)
+	if (l0011 < lmin .AND. l0011>0) then 
+		lmin = l0011
+	endif
+	if (ln0011 < lnmin .AND. ln0011>0) then 
+		lnmin = ln0011
+	endif
 		!0100
 	v0100	= vf			(iaprev,state10,ibprev,t)
 	vn0100	= vf_na			(iaprev,state10,ibprev,t,bcalc)
@@ -1408,6 +1468,12 @@ do t = 1,lifespan
 	an0100 	= assets(pf_na	(iaprev,state10,ibprev,t,bcalc))
 	l0100 	= lchoice		(iaprev,state10,ibprev,t)
 	ln0100 	= lchoice_na	(iaprev,state10,ibprev,t,bcalc)
+	if (l0100 < lmin .AND. l0100>0) then 
+		lmin = l0100
+	endif
+	if (ln0100 < lnmin .AND. ln0100>0) then 
+		lnmin = ln0100
+	endif
 		!0101
 	v0101	= vf			(iaprev,state10,ibnext,t)
 	vn0101	= vf_na			(iaprev,state10,ibnext,t,bcalc)
@@ -1415,6 +1481,12 @@ do t = 1,lifespan
 	an0101 	= assets(pf_na	(iaprev,state10,ibnext,t,bcalc))
 	l0101 	= lchoice		(iaprev,state10,ibnext,t)
 	ln0101 	= lchoice_na	(iaprev,state10,ibnext,t,bcalc)
+	if (l0101 < lmin .AND. l0101>0) then 
+		lmin = l0101
+	endif
+	if (ln0101 < lnmin .AND. ln0101>0) then 
+		lnmin = ln0101
+	endif
 		!0110
 	v0110	= vf			(iaprev,state11,ibprev,t)
 	vn0110	= vf_na			(iaprev,state11,ibprev,t,bcalc)
@@ -1422,6 +1494,12 @@ do t = 1,lifespan
 	an0110 	= assets(pf_na	(iaprev,state11,ibprev,t,bcalc))
 	l0110 	= lchoice		(iaprev,state11,ibprev,t)
 	ln0110 	= lchoice_na	(iaprev,state11,ibprev,t,bcalc)
+	if (l0110 < lmin .AND. l0110>0) then 
+		lmin = l0110
+	endif
+	if (ln0110 < lnmin .AND. ln0110>0) then 
+		lnmin = ln0110
+	endif
 		!0111
 	v0111	= vf			(iaprev,state11,ibnext,t)
 	vn0111	= vf_na			(iaprev,state11,ibnext,t,bcalc)
@@ -1429,6 +1507,12 @@ do t = 1,lifespan
 	an0111 	= assets(pf_na	(iaprev,state11,ibnext,t,bcalc))
 	l0111 	= lchoice		(iaprev,state11,ibnext,t)
 	ln0111 	= lchoice_na	(iaprev,state11,ibnext,t,bcalc)
+	if (l0111 < lmin .AND. l0111>0) then 
+		lmin = l0111
+	endif
+	if (ln0111 < lnmin .AND. ln0111>0) then 
+		lnmin = ln0111
+	endif
 		!1000
 	v1000 	= vf			(ianext,state00,ibprev,t)
 	vn1000 	= vf_na			(ianext,state00,ibprev,t,bcalc)
@@ -1436,6 +1520,12 @@ do t = 1,lifespan
 	an1000 	= assets(pf_na	(ianext,state00,ibprev,t,bcalc))
 	l1000 	= lchoice		(ianext,state00,ibprev,t)
 	ln1000 	= lchoice_na	(ianext,state00,ibprev,t,bcalc)
+	if (l1000 < lmin .AND. l1000>0) then 
+		lmin = l1000
+	endif
+	if (ln1000 < lnmin .AND. ln1000>0) then 
+		lnmin = ln1000
+	endif
 		!1001
 	v1001 	= vf			(ianext,state00,ibnext,t)
 	vn1001 	= vf_na			(ianext,state00,ibnext,t,bcalc)
@@ -1443,6 +1533,12 @@ do t = 1,lifespan
 	an1001 	= assets(pf_na	(ianext,state00,ibnext,t,bcalc))
 	l1001 	= lchoice		(ianext,state00,ibnext,t)
 	ln1001 	= lchoice_na	(ianext,state00,ibnext,t,bcalc)
+	if (l1001 < lmin .AND. l1001>0) then 
+		lmin = l1001
+	endif
+	if (ln1001 < lnmin .AND. ln1001>0) then 
+		lnmin = ln1001
+	endif
 		!1010
 	v1010	= vf			(ianext,state01,ibprev,t)
 	vn1010	= vf_na			(ianext,state01,ibprev,t,bcalc)
@@ -1450,6 +1546,12 @@ do t = 1,lifespan
 	an1010 	= assets(pf_na	(ianext,state01,ibprev,t,bcalc))
 	l1010 	= lchoice		(ianext,state01,ibprev,t)
 	ln1010 	= lchoice_na	(ianext,state01,ibprev,t,bcalc)
+	if (l1010 < lmin .AND. l1010>0) then 
+		lmin = l1010
+	endif
+	if (ln1010 < lnmin .AND. ln1010>0) then 
+		lnmin = ln1010
+	endif
 		!1011
 	v1011	= vf			(ianext,state01,ibnext,t)
 	vn1011	= vf_na			(ianext,state01,ibnext,t,bcalc)
@@ -1457,6 +1559,12 @@ do t = 1,lifespan
 	an1011 	= assets(pf_na	(ianext,state01,ibnext,t,bcalc))
 	l1011 	= lchoice		(ianext,state01,ibnext,t)
 	ln1011 	= lchoice_na	(ianext,state01,ibnext,t,bcalc)
+	if (l1011 < lmin .AND. l1011>0) then 
+		lmin = l1011
+	endif
+	if (ln1011 < lnmin .AND. ln1011>0) then 
+		lnmin = ln1011
+	endif
 		!1100
 	v1100	= vf			(ianext,state10,ibprev,t)
 	vn1100	= vf_na			(ianext,state10,ibprev,t,bcalc)
@@ -1464,6 +1572,12 @@ do t = 1,lifespan
 	an1100 	= assets(pf_na	(ianext,state10,ibprev,t,bcalc))
 	l1100 	= lchoice		(ianext,state10,ibprev,t)
 	ln1100 	= lchoice_na	(ianext,state10,ibprev,t,bcalc)
+	if (l1100 < lmin .AND. l1100>0) then 
+		lmin = l1100
+	endif
+	if (ln1100 < lnmin .AND. ln1100>0) then 
+		lnmin = ln1100
+	endif
 		!1101
 	v1101	= vf			(ianext,state10,ibnext,t)
 	vn1101	= vf_na			(ianext,state10,ibnext,t,bcalc)
@@ -1471,6 +1585,12 @@ do t = 1,lifespan
 	an1101 	= assets(pf_na	(ianext,state10,ibnext,t,bcalc))
 	l1101 	= lchoice		(ianext,state10,ibnext,t)
 	ln1101 	= lchoice_na	(ianext,state10,ibnext,t,bcalc)
+	if (l1101 < lmin .AND. l1101>0) then 
+		lmin = l1101
+	endif
+	if (ln1101 < lnmin .AND. ln1101>0) then 
+		lnmin = ln1101
+	endif
 		!1110
 	v1110	= vf			(ianext,state11,ibprev,t)
 	vn1110	= vf_na			(ianext,state11,ibprev,t,bcalc)
@@ -1478,6 +1598,12 @@ do t = 1,lifespan
 	an1110 	= assets(pf_na	(ianext,state11,ibprev,t,bcalc))
 	l1110 	= lchoice		(ianext,state11,ibprev,t)
 	ln1110 	= lchoice_na	(ianext,state11,ibprev,t,bcalc)
+	if (l1110 < lmin .AND. l1110>0) then 
+		lmin = l1110
+	endif
+	if (ln1110 < lnmin .AND. ln1110>0) then 
+		lnmin = ln1110
+	endif
 		!1111
 	v1111	= vf			(ianext,state11,ibnext,t)
 	vn1111	= vf_na			(ianext,state11,ibnext,t,bcalc)
@@ -1485,6 +1611,12 @@ do t = 1,lifespan
 	an1111 	= assets(pf_na	(ianext,state11,ibnext,t,bcalc))
 	l1111 	= lchoice		(ianext,state11,ibnext,t)
 	ln1111 	= lchoice_na	(ianext,state11,ibnext,t,bcalc)
+	if (l1111 < lmin .AND. l1111>0) then 
+		lmin = l1111
+	endif
+	if (ln1111 < lnmin .AND. ln1111>0) then 
+		lnmin = ln1111
+	endif
 
 	!check whether individual is:
 	!1) age<62: can't apply; use only vf_na (not vf)
@@ -1529,6 +1661,15 @@ do t = 1,lifespan
 						assets(ianext),wage(t,iwnext),mexp(t,h,imnext),ss(ibnext), &
 						ln0000,ln0001,ln0010,ln0011,ln0100,ln0101,ln0110,ln0111, &
 						ln1000,ln1001,ln1010,ln1011,ln1100,ln1101,ln1110,ln1111)
+		!Careful here: we'd like to avoid situations where an individual works few hours a year solely because of interpolation.
+		!First, let's find out if any of lnXXXX are 0. If none, then use lpx as is. If there is, then compare lpx and the smallest value of ln that is larger than 0 (lnmin).
+		!If lpx is even smaller, than set it to 0.
+		if (min(ln0000,ln0001,ln0010,ln0011,ln0100,ln0101,ln0110,ln0111, & 
+				ln1000,ln1001,ln1010,ln1011,ln1100,ln1101,ln1110,ln1111) == 0 .AND. lpx >0) then
+			if (lpx < lnmin) then
+				lpx = 0.0d0
+			endif
+		endif
 
 		!we have to update AIME
 		if (bcalc == 1) then !individual worked less than 35 years
@@ -1555,6 +1696,15 @@ do t = 1,lifespan
 						assets(ianext),wage(t,iwnext),mexp(t,h,imnext),ss(ibnext), &
 						l0000,l0001,l0010,l0011,l0100,l0101,l0110,l0111, &
 						l1000,l1001,l1010,l1011,l1100,l1101,l1110,l1111)
+		!Careful here: we'd like to avoid situations where an individual works few hours a year solely because of interpolation.
+		!First, let's find out if any of lXXXX are 0. If none, then use lpx as is. If there is, then compare lpx and the smallest value of lnXXXX that is larger than 0 (lmin).
+		!If lpx is even smaller, than set it to 0.
+		if (min(l0000,l0001,l0010,l0011,l0100,l0101,l0110,l0111, & 
+				l1000,l1001,l1010,l1011,l1100,l1101,l1110,l1111) == 0 .AND. lpx>0) then
+			if (lpx < lmin) then
+				lpx = 0.0d0
+			endif
+		endif
 		!In this case, we don't care about the AIME and working years anymore, it doesn't play any role
 	else !Excluded case, just fishing for errors
 		print *, "Wrong scenario, check SS applicaton code in lc_simulation"
@@ -1584,11 +1734,11 @@ do t = 1,lifespan
 	!notice that at age 90 an individual doesn't survive
 	call random_number(rndnum)
 	if (rndnum > surv(t,h)) then !a person is dead
-		life_assets(t+2:lifespan+1) = -1
-		life_labor(t+1:lifespan) 	= -1
-		life_wage(t+1:lifespan) 	= -1
-		life_earnings(t+1:lifespan) = -1
-		life_medexp(t+1:lifespan) 	= -1
+!		life_assets(t+2:lifespan+1) = -1
+!		life_labor(t+1:lifespan) 	= -1
+!		life_wage(t+1:lifespan) 	= -1
+!		life_earnings(t+1:lifespan) = -1
+!		life_medexp(t+1:lifespan) 	= -1
 		if (app_age>age) then !individual didn't apply for the benefits
 			app_age = -1
 		endif
