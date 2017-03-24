@@ -10,7 +10,7 @@ interface
     function func(x)
     use nrtype
     implicit none
-    real(DP), dimension(:), intent(in) :: x
+    real(DP), dimension(:), intent(inout) :: x
     real(DP) :: func
     end function func
 end interface

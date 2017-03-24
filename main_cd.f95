@@ -41,7 +41,7 @@ end subroutine labchoice
 subroutine lc_simulation(cohort,in_asset,in_aime,in_wage,in_mexp,in_health,years_aime, &
 						wage,logwage,wzmean,wzsd,wbinborders,mexp,logmexp,mzmean,mzsd, &
 						mbinborders,ms,transmat,vf,vf_na,pf,pf_na,lchoice,lchoice_na,app_policy, surv, &
-						life_assets,life_labor,life_earnings, life_wage, life_medexp,app_age,tn_seed)
+						life_assets,life_labor,life_earnings, life_wage, life_medexp,life_health,app_age,tn_seed)
 	use parameters
 	use procedures
 	integer, intent(in) :: cohort, in_health
@@ -63,7 +63,7 @@ subroutine lc_simulation(cohort,in_asset,in_aime,in_wage,in_mexp,in_health,years
 	real (kind = 8), dimension(lifespan,nhealth), intent(in) :: surv
 	real (kind = 8), dimension(grid_asset,statesize,grid_ss,lifespan,2), intent(in) :: lchoice_na
 	real (kind = 8), intent(out) :: life_assets(lifespan)
-	real (kind = 8), dimension(lifespan), intent(out) :: life_labor, life_earnings, life_wage, life_medexp
+	real (kind = 8), dimension(lifespan), intent(out) :: life_labor, life_earnings, life_wage, life_medexp, life_health
 	integer, intent(out) :: app_age
 	integer, intent(inout) :: tn_seed
 
@@ -80,7 +80,7 @@ subroutine amoeba(p,y,ftol,func,iter,info)
 		function func(x)
 		use nrtype
 		implicit none
-		real(DP), dimension(:), intent(in) :: x
+		real(DP), dimension(:), intent(inout) :: x
 		real(DP) :: func
 		end function func
 	end interface
@@ -98,6 +98,7 @@ integer iter, info
 
 !	2.
 character*200 datafile !address of the data file on the disk
+character*200 command !bash command
 character*30, names(5)
 real (kind = 8) statvec(statesize), cumstvec(statesize) !stationary distribution of states, and cumulative stationary distribution
 !-------------------------------
@@ -146,7 +147,7 @@ real (kind = 8), dimension(grid_asset,statesize,grid_ss,lifespan,2) :: app_polic
 real (kind = 8), dimension(grid_asset,statesize,grid_ss,lifespan,2) :: lchoice_na
 !results of simulation: single simulation and averaged over "nsim" simulations
 real (kind = 8)  life_assets(lifespan), mean_lifeassets(lifespan)
-real (kind = 8), dimension(lifespan) :: life_labor, life_earnings, life_wage, life_medexp, life_lfp, worker_wage
+real (kind = 8), dimension(lifespan) :: life_labor, life_earnings, life_wage, life_medexp, life_lfp, worker_wage, life_health
 real (kind = 8), dimension(lifespan) :: mean_lifelabor,mean_lifeearnings,mean_lifewage,mean_lifemedexp,mean_lfp,mean_workerwage, &
 										mean_applied
 real (kind = 8), dimension(lifespan) :: delta_wage, initial_wage, updated_wage, upd_logwage
@@ -184,7 +185,7 @@ real (kind = 8) joint_awma0(4,9) 				!4 = male/femele * college/noncollege; 9 = 
 real (kind = 8) joint_awma(4,14)				!4 = male/femele * college/noncollege; 14 = mu_a, mu_w, mu_m, mu_assets + varcov mat (10 values)
 
 !Variables containing data moments
-real (kind = 8), dimension(:), allocatable ::	datalfp, datahours, datassets, dataret
+real (kind = 8), dimension(:), allocatable ::	datalfp, datahours, datassets, dataret, sdlfp, sdhours,sdassets,sdret
 real (kind = 8), dimension(:), allocatable ::	modellfp, modelhours, modelassets, modelret
 real (kind = 8), dimension(:,:), allocatable ::	moments
 
@@ -195,10 +196,9 @@ real (kind = 8) ssr, conv_crit
 
 !PROGRAM BODY
 
-
 !	Initialize structural parameters
 !	ltot kappa d cmin beta delta eta sigma cgamma lgamma xi nu
-structparams = (/4.8d3, 9.0d2, 1.0d5, 2.6d3, 0.95d0, 0.2d0,  1.8d0, 1.75d0, 0.3d0, 0.5d0, 1.4d0, 2.0d0/)
+structparams = (/5.0d3, 9.0d2, 1.0d5, 2.6d3, 0.95d0, 0.2d0,  1.8d0, 1.75d0, 0.5d0, 0.5d0, 1.4d0, 2.0d0/)
 !structparams = (/3.8d0,870.07d0, 98691.4d0, 2584.5d0, 0.98d0, 0.2d0, 1.8d0, 1.78d0,  0.31d0,  0.39d0,1.9d0, 1.5d0/)
 !read (*,*)
 !parameter values:   4329.5102084019554        870.07494196261041        98691.438175558287        2584.4577746812288       0.98089214831123517       0.19956086722606781        1.7998490549485420        1.7784006858736456       0.30618202318229315       0.38606688813185541        1.3594207172878821        1.9883658329442573
@@ -241,177 +241,10 @@ endif
 icoh = (itype-1)/4 + 1 !cohort is 1/2 and not 0/1 because of indexing style; it is passed to valfun, where it is passed to aime_calc and benefit_calc
 !sex = mod(ind_type,2)
 
-!-----------------------------------------------------------------------
-!1. Import files
 
-!1.1 Import transition matrices
-!1.1.1 Wage transitions
-datafile = 'data_inputs/transmat_wage.csv'
-call import_matrices(datafile,wagetrans)
-!1.1.2 Med expenses transitions
-datafile = 'data_inputs/transmat_mexp.csv'
-call import_matrices(datafile,medtrans)
-!1.1.3 Health transitions, survival and type matrix
-do cohort = 0,1
-	do college = 0,1
-		do sex = 0,1
-            do health = 0,1
-                !type matrix
-                !!!! VERY IMPORTANT!!!
-                !this has to be consistent with stata formulas!!!
-                ind_type = 1+sex+2*college+4*cohort
-                typemat(ind_type,:) = (/cohort,college,sex/)
-				!print *, typemat(ind_type,:)
-                !import health transitions: for each type and health status, has length of lifespan-1 (at age 90 no transition to any health status)
-                WRITE(datafile,'(a,i1,a,i1,a,i1,a,i1,a)') &
-                    "data_inputs/healthtrans_coh",cohort,"_sex",sex,"_college",college,"_health",health,".csv"
-                call import_vector(datafile,healthtrans(:,health+1,ind_type)) !"short" health transition matrix: only probabilities of transition to a good state
-                !print *, size(healthtrans(:,health+1,ind_type))
-                !print *, healthtrans(1,:,ind_type)
-                !import survival rates: for each type w/o health and health status, has length of lifespan, but survival rate at age 90 equals to zero
-                WRITE(datafile,'(a,i1,a,i1,a,i1,a,i1,a)') &
-                    "data_inputs/survival_coh",cohort,"_sex",sex,"_college",college,"_health",health,".csv"
-                call import_vector(datafile,surv(1:lifespan-1,health+1,ind_type))
-                surv(lifespan,health+1,ind_type) = 0
-                !print *, surv(1,:,ind_type)
-            enddo
-        enddo
-    enddo
-enddo
+!Load inputs
 
-!1.1.4. Initial joint distribution of young cohort at age 50 of AIME, assets, wage and medical expenses; joint probabilities of bad health and zero assets
-!		Every imported matrix has four rows, which denote:
-!					1 row: male 0, college 0
-!					2 row: male 0, college 1
-!					3 row: male 1, college 0
-!					4 row: male 1, college 1
-
-!1.1.4.1. 	Joint probabilities of having good/bad health and zero/nonzero assets
-!			4 columns, denote following:
-!			1: Pr(assets = 0, health = 0)
-!			2: Pr(assets = 0, health = 1)
-!			3: Pr(assets = 1, health = 0)
-!			4: Pr(assets = 1, health = 1)
-!	Rows are described above.
-
-datafile = 'data_inputs/joint_assets_health.csv'
-call import_data(datafile,prob_ah)
-!			Calculate CDF and store in cdf_ah
-!			We'll need it during simulation cycle
-do i = 1,4
-	call cumsum(prob_ah(i,:), cdf_ah(i,:))
-enddo
-!1.1.4.2. Means and varcov matrix of joint lognormal distribution of mexp, aime and wage, assets == 0
-!			9 columns, denote following:
-!mu(logaime) mu(logwage) mu(logmexp) Var(logaime) Cov(logaime,logwage)	Var(logwage) Cov(logaime,logmexp) Cov(logwage,logmexp)	Var(logmexp)
-!	Rows are described above.
-
-datafile = 'data_inputs/joint_amw_zeroas.csv'
-call import_data(datafile,joint_awma0)
-
-!1.1.4.3. Means and varcov matrix of joint lognormal distribution of mexp, aime and wage and assets when assets > 0
-!			14 columns, denote following:
-!mu(laime) mu(lwage) mu(lmexp) mu(las) Var(laime) Cov(laime,lwage) Var(lwage) Cov(laime,lmexp) Cov(lwage,lmexp)	Var(lmexp) Cov(las,laime) Cov(las,lwage) Cov(las,lmexp) Var(las)
-!	Rows are described above.
-
-datafile = 'data_inputs/joint_aamw_nzeroas.csv'
-call import_data(datafile,joint_awma)
-
-!2.	Construct wage and medical expenses grids
-!Import a wage profile, profile of sd and mean of parenting normal distribution (which we are going to use to draw a wage)
-!		And med exp profile, profile of sd and mean of parenting normal distribution (which we are going to use to draw a med exp), additionally conditional on health
-
-!1. Matrices of bin borders
-WRITE(datafile,'(a,i1,a)') "data_inputs/wagebin_borders_smooth.csv"
-call import_data(datafile,wbinborders)
-
-WRITE(datafile,'(a,i1,a)') "data_inputs/medbin_borders_smooth.csv"
-call import_data(datafile,mbinborders)
-
-do i = 1,ntypes
-	!import from a proper file
-	WRITE(datafile,'(a,i1,a)') "data_inputs/lwage_smooth_",i,".csv"
-	call import_data(datafile,logwagedata(:,:,i))
-	logwage(:,i) = logwagedata(:,1,i)
-!	Artificially decrease wage: starting at age 60 to age 75 (16 points), linear dectrase
-!	Temporary code!
-
-!	call linspace(logwage(11,i),0.0d0,16,lwagetemp(:,i))
-!	logwage(11:26,i) = lwagetemp(:,i)
-!	logwage(27:lifespan,i) = 0.0d0
-
-!	logwage(:,i) = 0.2*logwage(:,i)
-
-!	End of temporary code
-
-	wzmean(:,i) = logwagedata(:,2,i)
-	wzsd(:,i) = logwagedata(:,3,i)
-	!construct a wage grid:
-	!values of wage on the borders of bins
-	do k = 1,nwagebins
-		do t = 1,lifespan
-			call truncated_normal_ab_mean (wzmean(t,i), wzsd(t,i), wbinborders(t,k), wbinborders(t,k+1), bin_mean)
-			wagegrid(t,k,i) = exp(logwage(t,i)	+	bin_mean)
-		enddo
-	enddo
-
-
-!Same for medical expenses, additionally condition on health
-	do j = 1,nhealth
-		WRITE(datafile,'(a,i1,i1,a)') "data_inputs/lmexp_smooth_",i,j-1,".csv"
-		call import_data(datafile,logmexpdata(:,:,j,i))
-		logmexp(:,j,i) = logmexpdata(:,1,j,i)
-		mzmean(:,j,i) = logmexpdata(:,2,j,i)
-		mzsd(:,j,i) = logmexpdata(:,3,j,i)
-		do k = 1,nmedbins
-			do t = 1,lifespan
-				call truncated_normal_ab_mean (mzmean(t,j,i), mzsd(t,j,i), mbinborders(t,k), mbinborders(t,k+1), bin_mean)
-				mexpgrid(t,j,k,i) = exp(logmexp(t,j,i)	+	bin_mean)
-			enddo
-		enddo
-	enddo
-enddo
-
-!-----------------------------------------------------------------------
-!3. Construct matrix of the correspondence of exostate to shocks
-do w = 1,nwagebins
-    do m = 1,nmedbins
-        do h = 1,nhealth
-            k = h+nhealth*(m-1)+nmedbins*nhealth*(w-1)
-            ms(k,:) = (/w,m,h/) !matrix that translates combination of wage shocks, med exp shocks and health shocks into a single number
-            !print *, ms(k,:)
-        enddo
-    enddo
-enddo
-
-!-----------------------------------------------------------------------
-!4. construct Kronecker product of transition matrices for each individual type and each age;
-!result is stored in transmat
-do k = 1,ntypes
-    do t = 1,lifespan-1
-        !construct full health trans matrix: the difference from reduced form is
-        !in probabilities of transition from both good and bad states,
-        !it is just expansion of reduced matrix
-        htrans_full(1,1,t,k) = 1-healthtrans(t,1,k) !bad-to-bad health
-        htrans_full(1,2,t,k) = healthtrans(t,1,k) !bad-to-good health
-        htrans_full(2,1,t,k) = 1-healthtrans(t,2,k) !good-to-bad health
-        htrans_full(2,2,t,k) = healthtrans(t,2,k) !good-to-good health
-        !print *, wagetrans(:,:,t)
-        !print *, medtrans(:,:,t)
-        !print *, htrans_full(:,:,t,z)
-        do j =  1,statesize !rows of transition matrix
-            do i = 1,statesize !columns of transition matrix
-                w = ms(i,1) !current wage  shock: 1 to grid_wage
-                wn = ms(j,1) !next period wage
-                m = ms(i,2) !current medical shock: 1 to grid_med
-                mn = ms(j,2) !next period med
-                h = ms(i,3) !current health status: 1(unhealthy) or 2(healthy)
-                hn = ms(j,3) !next period med shock
-                transmat(i,j,t,k) = wagetrans(w,wn,t)*medtrans(m,mn,t)*htrans_full(h,hn,t,k)
-            enddo
-        enddo
-    enddo
-enddo
+call inputs(1) ! (1) means initial inputs
 !-----------------------------------------------------------------------
 !		TESTING GROUNDS
 
@@ -423,7 +256,11 @@ allocate(datalfp(tmom(icoh)))
 allocate(datahours(tmom(icoh)))
 allocate(datassets(tmom(icoh)))
 allocate(dataret(tmom(icoh)))
-allocate(moments(3*tmom(icoh),1))
+allocate(sdlfp(tmom(icoh)))
+allocate(sdhours(tmom(icoh)))
+allocate(sdassets(tmom(icoh)))
+allocate(sdret(tmom(icoh)))
+allocate(moments(4*tmom(icoh),1))
 !	model
 allocate(modellfp(tmom(icoh)))
 allocate(modelhours(tmom(icoh)))
@@ -432,21 +269,28 @@ allocate(modelret(tmom(icoh)))
 !	2.load data
 write(datafile,'(a,i1.1,a)') "data_inputs/lfp_data_",itype,".csv"
 call import_vector(datafile,datalfp)
+write(datafile,'(a,i1.1,a)') "data_inputs/sd_lfp_data_",itype,".csv"
+call import_vector(datafile,sdlfp)
 write(datafile,'(a,i1.1,a)') "data_inputs/hours_data_",itype,".csv"
 call import_vector(datafile,datahours)
+write(datafile,'(a,i1.1,a)') "data_inputs/sd_hours_data_",itype,".csv"
+call import_vector(datafile,sdhours)
 write(datafile,'(a,i1.1,a)') "data_inputs/assets_data_",itype,".csv"
 call import_vector(datafile,datassets)
+write(datafile,'(a,i1.1,a)') "data_inputs/sd_assets_data_",itype,".csv"
+call import_vector(datafile,sdassets)
 write(datafile,'(a,i1.1,a)') "data_inputs/applied_",itype,".csv"
 call import_vector(datafile,dataret)
 
+sdret = sd(dataret)
 !----------------------
 
 
 
 
-!Calculate stationary distribution of states at age 50 for that type
-call stationary_dist(transmat(:,:,1,itype),statvec)
-call cumsum(statvec,cumstvec)
+!!Calculate stationary distribution of states at age 50 for that type
+!call stationary_dist(transmat(:,:,1,itype),statvec)
+!call cumsum(statvec,cumstvec)
 
 !MAIN SIMULATION CYCLE
 !first, initialize a randomizer
@@ -497,18 +341,11 @@ do while (conv_crit>10*tol)
     !	1.1. Solve for wage update
     call moment_wage_calc(structparams, ssr, delta_wage)
     
-    !call execute_command_line ("cd data_output/stata && stata simulwage_update.do && cd ../..")  
-    !	1.2. Сonstructing new wage grid aroud updated logwage
-    !THIS IS NOT A PERFECT WAY TO CONSTRUCT THE UPDATED WAGE GRID
-    !I NEED TO SYNCHRONIZE THIS WITH STATA: get updated wzmean and wzsd using exactly the same procedures I use in stata
-    updated_wage = initial_wage*(1-delta_wage)
+    !Use simulated data to update grid on wage and transition probabilities
+    write(command,'(a,i1.1,a)') "cd data_output/stata && stata simulwage_update.do ",itype," && cd ../.."
     
-	do k = 1,nwagebins
-		do t = 1,lifespan
-			call truncated_normal_ab_mean (wzmean(t,icoh), wzsd(t,icoh), wbinborders(t,k), wbinborders(t,k+1), bin_mean)
-			wagegrid(t,k,icoh) = exp(log(updated_wage(t))	+	bin_mean)
-		enddo
-	enddo
+    call execute_command_line (command)  
+    call inputs(2)
 	
 !	initial_wage = updated_wage
 !	conv_crit = sum(sqrt(delta_wage**2))
@@ -527,7 +364,7 @@ do while (conv_crit>10*tol)
 		print *, 'Simplex vectot number', n+1
 		y = structparams
 		if (y(n) /= 0.) then
-			y(n) = (1+usual_delta)*y(n)
+			y(n) = (1-usual_delta)*y(n)
 		else
 			y(n) = zero_term_delta
 		endif
@@ -542,7 +379,7 @@ do while (conv_crit>10*tol)
 
 	initial_wage = updated_wage
 	
-	conv_crit = sum(sqrt((initial_wage - updated_wage)**2))
+	conv_crit = sum(sqrt((delta_wage)**2))
 	print *, 'convergence criterion', conv_crit
 enddo
 
@@ -554,6 +391,10 @@ deallocate(datalfp)
 deallocate(datahours)
 deallocate(datassets)
 deallocate(dataret)
+deallocate(sdlfp)
+deallocate(sdhours)
+deallocate(sdassets)
+deallocate(sdret)
 deallocate(moments)
 deallocate(modellfp)
 deallocate(modelhours)
@@ -562,40 +403,216 @@ deallocate(modelret)
 
 
 contains
-	subroutine inputs
+	subroutine inputs(mode)
+		integer, intent(in) :: mode
+		character(len = 10) expr
+		if (mode == 1) then
+			expr = ''
+		else
+			expr = '_simul'
+		endif
+			!-----------------------------------------------------------------------
+		!1. Import files
+
+		!1.1 Import transition matrices
+		!1.1.1 Wage transitions
+		datafile = 'data_inputs/transmat_wage'//trim(expr)//'.csv'
+		call import_matrices(datafile,wagetrans)
+		!1.1.2 Med expenses transitions
+		datafile = 'data_inputs/transmat_mexp.csv'
+		call import_matrices(datafile,medtrans)
+		!1.1.3 Health transitions, survival and type matrix
+		do cohort = 0,1
+			do college = 0,1
+				do sex = 0,1
+					do health = 0,1
+						!type matrix
+						!!!! VERY IMPORTANT!!!
+						!this has to be consistent with stata formulas!!!
+						ind_type = 1+sex+2*college+4*cohort
+						typemat(ind_type,:) = (/cohort,college,sex/)
+						!print *, typemat(ind_type,:)
+						!import health transitions: for each type and health status, has length of lifespan-1 (at age 90 no transition to any health status)
+						WRITE(datafile,'(a,i1,a,i1,a,i1,a,i1,a)') &
+							"data_inputs/healthtrans_coh",cohort,"_sex",sex,"_college",college,"_health",health,".csv"
+						call import_vector(datafile,healthtrans(:,health+1,ind_type)) !"short" health transition matrix: only probabilities of transition to a good state
+						!print *, size(healthtrans(:,health+1,ind_type))
+						!print *, healthtrans(1,:,ind_type)
+						!import survival rates: for each type w/o health and health status, has length of lifespan, but survival rate at age 90 equals to zero
+						WRITE(datafile,'(a,i1,a,i1,a,i1,a,i1,a)') &
+							"data_inputs/survival_coh",cohort,"_sex",sex,"_college",college,"_health",health,".csv"
+						call import_vector(datafile,surv(1:lifespan-1,health+1,ind_type))
+						surv(lifespan,health+1,ind_type) = 0
+						!print *, surv(1,:,ind_type)
+					enddo
+				enddo
+			enddo
+		enddo
+
+		!1.1.4. Initial joint distribution of young cohort at age 50 of AIME, assets, wage and medical expenses; joint probabilities of bad health and zero assets
+		!		Every imported matrix has four rows, which denote:
+		!					1 row: male 0, college 0
+		!					2 row: male 0, college 1
+		!					3 row: male 1, college 0
+		!					4 row: male 1, college 1
+
+		!1.1.4.1. 	Joint probabilities of having good/bad health and zero/nonzero assets
+		!			4 columns, denote following:
+		!			1: Pr(assets = 0, health = 0)
+		!			2: Pr(assets = 0, health = 1)
+		!			3: Pr(assets = 1, health = 0)
+		!			4: Pr(assets = 1, health = 1)
+		!	Rows are described above.
+
+		datafile = 'data_inputs/joint_assets_health.csv'
+		call import_data(datafile,prob_ah)
+		!			Calculate CDF and store in cdf_ah
+		!			We'll need it during simulation cycle
+		do i = 1,4
+			call cumsum(prob_ah(i,:), cdf_ah(i,:))
+		enddo
+		!1.1.4.2. Means and varcov matrix of joint lognormal distribution of mexp, aime and wage, assets == 0
+		!			9 columns, denote following:
+		!mu(logaime) mu(logwage) mu(logmexp) Var(logaime) Cov(logaime,logwage)	Var(logwage) Cov(logaime,logmexp) Cov(logwage,logmexp)	Var(logmexp)
+		!	Rows are described above.
+
+		datafile = 'data_inputs/joint_amw_zeroas.csv'
+		call import_data(datafile,joint_awma0)
+
+		!1.1.4.3. Means and varcov matrix of joint lognormal distribution of mexp, aime and wage and assets when assets > 0
+		!			14 columns, denote following:
+		!mu(laime) mu(lwage) mu(lmexp) mu(las) Var(laime) Cov(laime,lwage) Var(lwage) Cov(laime,lmexp) Cov(lwage,lmexp)	Var(lmexp) Cov(las,laime) Cov(las,lwage) Cov(las,lmexp) Var(las)
+		!	Rows are described above.
+
+		datafile = 'data_inputs/joint_aamw_nzeroas.csv'
+		call import_data(datafile,joint_awma)
+
+		!2.	Construct wage and medical expenses grids
+		!Import a wage profile, profile of sd and mean of parenting normal distribution (which we are going to use to draw a wage)
+		!		And med exp profile, profile of sd and mean of parenting normal distribution (which we are going to use to draw a med exp), additionally conditional on health
+
+		!1. Matrices of bin borders
+		datafile = 'data_inputs/wagebin_borders_smooth'//trim(expr)//'.csv'
+		call import_data(datafile,wbinborders)
+
+		WRITE(datafile,'(a,i1,a)') "data_inputs/medbin_borders_smooth.csv"
+		call import_data(datafile,mbinborders)
+
+		do i = 1,ntypes
+			!import from a proper file
+			if (mode == 2 .AND. i == itype) then !import from updated file
+				datafile = 'data_inputs/lwage_smooth_simul.csv'
+			else !import from initial file
+				WRITE(datafile,'(a,i1,a)') "data_inputs/lwage_smooth_",i,".csv"
+			endif
+			call import_data(datafile,logwagedata(:,:,i))
+			logwage(:,i) = logwagedata(:,1,i)
+
+			wzmean(:,i) = logwagedata(:,2,i)
+			wzsd(:,i) = logwagedata(:,3,i)
+			!construct a wage grid:
+			!values of wage on the borders of bins
+			do k = 1,nwagebins
+				do t = 1,lifespan
+					call truncated_normal_ab_mean (wzmean(t,i), wzsd(t,i), wbinborders(t,k), wbinborders(t,k+1), bin_mean)
+					wagegrid(t,k,i) = exp(logwage(t,i)	+	bin_mean)
+				enddo
+			enddo
+
+
+		!Same for medical expenses, additionally condition on health
+			do j = 1,nhealth
+				WRITE(datafile,'(a,i1,i1,a)') "data_inputs/lmexp_smooth_",i,j-1,".csv"
+				call import_data(datafile,logmexpdata(:,:,j,i))
+				logmexp(:,j,i) = logmexpdata(:,1,j,i)
+				mzmean(:,j,i) = logmexpdata(:,2,j,i)
+				mzsd(:,j,i) = logmexpdata(:,3,j,i)
+				do k = 1,nmedbins
+					do t = 1,lifespan
+						call truncated_normal_ab_mean (mzmean(t,j,i), mzsd(t,j,i), mbinborders(t,k), mbinborders(t,k+1), bin_mean)
+						mexpgrid(t,j,k,i) = exp(logmexp(t,j,i)	+	bin_mean)
+					enddo
+				enddo
+			enddo
+		enddo
+
+		!-----------------------------------------------------------------------
+		!3. Construct matrix of the correspondence of exostate to shocks
+		do w = 1,nwagebins
+			do m = 1,nmedbins
+				do h = 1,nhealth
+					k = h+nhealth*(m-1)+nmedbins*nhealth*(w-1)
+					ms(k,:) = (/w,m,h/) !matrix that translates combination of wage shocks, med exp shocks and health shocks into a single number
+					!print *, ms(k,:)
+				enddo
+			enddo
+		enddo
+
+		!-----------------------------------------------------------------------
+		!4. construct Kronecker product of transition matrices for each individual type and each age;
+		!result is stored in transmat
+		do k = 1,ntypes
+			do t = 1,lifespan-1
+				!construct full health trans matrix: the difference from reduced form is
+				!in probabilities of transition from both good and bad states,
+				!it is just expansion of reduced matrix
+				htrans_full(1,1,t,k) = 1-healthtrans(t,1,k) !bad-to-bad health
+				htrans_full(1,2,t,k) = healthtrans(t,1,k) !bad-to-good health
+				htrans_full(2,1,t,k) = 1-healthtrans(t,2,k) !good-to-bad health
+				htrans_full(2,2,t,k) = healthtrans(t,2,k) !good-to-good health
+				!print *, wagetrans(:,:,t)
+				!print *, medtrans(:,:,t)
+				!print *, htrans_full(:,:,t,z)
+				do j =  1,statesize !rows of transition matrix
+					do i = 1,statesize !columns of transition matrix
+						w = ms(i,1) !current wage  shock: 1 to grid_wage
+						wn = ms(j,1) !next period wage
+						m = ms(i,2) !current medical shock: 1 to grid_med
+						mn = ms(j,2) !next period med
+						h = ms(i,3) !current health status: 1(unhealthy) or 2(healthy)
+						hn = ms(j,3) !next period med shock
+						transmat(i,j,t,k) = wagetrans(w,wn,t)*medtrans(m,mn,t)*htrans_full(h,hn,t,k)
+					enddo
+				enddo
+			enddo
+		enddo
 	end subroutine inputs
+	
 	subroutine moment_wage_calc(strpar, momnorm, dwage)
 	!	Function takes a vector of structural parameters ("strpar") and spits out norm of moment conditions as a function result.
 		use parameters
 		use procedures
 		use nrtype
 		implicit none
-		real (DP), dimension(:), intent(in)	:: strpar ! ltot kappa d cmin age0 beta delta eta sigma ugamma xi nu
+		real (DP), dimension(:), intent(inout)	:: strpar ! ltot kappa d cmin age0 beta delta eta sigma ugamma xi nu
 		real (kind = 8), dimension(lifespan), intent(out) :: dwage
 		real (DP), intent(out) :: momnorm !norm of the moments
-		real (DP), dimension(:), allocatable :: stp
+!		real (DP), dimension(:), allocatable :: stp
 
 !		Local var
 		real (kind = 8), dimension(:,:), allocatable :: multmat, weightmat
-		real (kind = 8) mn(1,1)
+		real (kind = 8) mn(1,1), variances(4)
 
 
 	!	BODY OF FUNCTION
-	!	1. fill in the parameters
-		allocate(stp(size(strpar)))
-		stp	= max(strpar,0.0)
-		ltot 	= min(stp(1), 5.0d3) !ltot E [0,5000]
-		kappa 	= stp(2)
-		d 		= stp(3)
-		cmin 	= stp(4)
-		beta 	= min(max(stp(5),0.9),1.0)
-		delta 	= stp(6)
-		eta 	= stp(7)
-		sigma 	= stp(8)
-		cgamma 	= stp(9)
-		lgamma 	= stp(10)
-		xi 		= stp(11)
-		nu 		= stp(12)
+	!	1. fill in the parameters, controlling for possible range
+!		allocate(stp(size(strpar)))
+		strpar		= max(strpar,0.0)
+		strpar(1)	= min(strpar(1), 5.0d3) !ltot E [0,5000]	
+		strpar(5) 	= min(max(strpar(5),0.9d0),0.99999d0) !beta E [0.9;0.99999]
+		
+		ltot 	= strpar(1)
+		kappa 	= strpar(2)
+		d 		= strpar(3)
+		cmin 	= strpar(4)
+		beta 	= strpar(5)
+		delta 	= strpar(6)
+		eta 	= strpar(7)
+		sigma 	= strpar(8)
+		cgamma 	= strpar(9)
+		lgamma 	= strpar(10)
+		xi 		= strpar(11)
+		nu 		= strpar(12)
 
 	!	2. Calculate value function given these parameters
 		!labor choice
@@ -606,12 +623,20 @@ contains
 		vf,vf_na,pf,pf_na,lchoice,lchoice_na,app_policy)
 
 		!open files to save results
-		open(unit=11,file='data_output/life_assets_cd.txt',status='replace')
-		open(unit=12,file='data_output/life_labor_cd.txt',status='replace')
-		open(unit=13,file='data_output/life_earnings_cd.txt',status='replace')
-		open(unit=14,file='data_output/life_wage_cd.txt',status='replace')
-		open(unit=15,file='data_output/life_medexp_cd.txt',status='replace')
-		open(unit=16,file='data_output/app_age_cd.txt',status='replace')
+		write(datafile,'(a,i1.1,a)') "data_output/life_assets_cd_",itype,".txt"
+		open(unit=11,file=datafile,status='replace')
+		write(datafile,'(a,i1.1,a)') "data_output/life_labor_cd_",itype,".txt"
+		open(unit=12,file=datafile,status='replace')
+		write(datafile,'(a,i1.1,a)') "data_output/life_earnings_cd_",itype,".txt"
+		open(unit=13,file=datafile,status='replace')
+		write(datafile,'(a,i1.1,a)') "data_output/life_wage_cd_",itype,".txt"
+		open(unit=14,file=datafile,status='replace')
+		write(datafile,'(a,i1.1,a)') "data_output/life_medexp_cd_",itype,".txt"
+		open(unit=15,file=datafile,status='replace')
+		write(datafile,'(a,i1.1,a)') "data_output/app_age_cd_",itype,".txt"
+		open(unit=16,file=datafile,status='replace')
+		write(datafile,'(a,i1.1,a)') "life_health_cd_",itype,".txt"
+		open(unit=17,file=datafile,status='replace')
 
 		counter = 0
 		first = .TRUE.
@@ -681,7 +706,7 @@ contains
 						logwage(:,itype),wzmean(:,itype),wzsd(:,itype), wbinborders, &
 						mexpgrid(:,:,:,itype),logmexp(:,:,itype),mzmean(:,:,itype),mzsd(:,:,itype), mbinborders, &
 						ms, transmat(:,:,:,itype),vf,vf_na,pf,pf_na,lchoice,lchoice_na,app_policy, surv(:,:,itype), &
-						life_assets,life_labor,life_earnings, life_wage, life_medexp,app_age,tn_seed)
+						life_assets,life_labor,life_earnings, life_wage, life_medexp,life_health,app_age,tn_seed)
 			!construct a vector of number of ss applications at a given age
 			if (app_age > 0) then
 				mean_applied(app_age-49) = mean_applied(app_age-49) + 1
@@ -709,7 +734,7 @@ contains
 
 
 			!save the simulation results to .csv files
-			do j = 11,16
+			do j = 11,17
 				call csv_write(j,i,.false.) !put the simulation number in the begining of the line, not advancing to next line
 			enddo
 
@@ -720,10 +745,11 @@ contains
 			call csv_write(14,life_wage,.true.)
 			call csv_write(15,life_medexp,.true.)
 			call csv_write(16,app_age,.true.)
+			call csv_write(17,life_health,.true.)
 		enddo
 
 		!close opened files
-		do i = 11,16
+		do i = 11,17
 			close(i)
 		enddo
 
@@ -750,22 +776,34 @@ contains
 		
 		!calculate difference between data and model moments
 		if (icoh == 1) then
-			moments(:,1) = (/datalfp - mean_lfp(8:lifespan),(datahours-mean_lifelabor(8:lifespan))/1000, &
-			(datassets - mean_lifeassets(8:lifespan))/100000/)
+			moments(:,1) = (/datalfp - mean_lfp(8:lifespan),datahours-mean_lifelabor(8:lifespan), &
+			datassets - mean_lifeassets(8:lifespan), dataret - mean_applied(8:lifespan)/)
+!			variances(1) = variance((/datalfp - mean_lfp(8:lifespan)/))
+!			variances(2) = variance((/datahours-mean_lifelabor(8:lifespan)/))
+!			variances(3) = variance((/datassets - mean_lifeassets(8:lifespan)/))
+!			variances(4) = variance((/dataret - mean_applied(8:lifespan)/))
 		else
-			moments(:,1) = (/datalfp - mean_lfp(1:18),(datahours-mean_lifelabor(1:18))/1000, &
-			(datassets - mean_lifeassets(1:18))/100000/)
+			moments(:,1) = (/datalfp - mean_lfp(1:18),datahours-mean_lifelabor(1:18), &
+			datassets - mean_lifeassets(1:18),dataret - mean_applied(1:18)/)
+!			variances(1) = variance((/datalfp - mean_lfp(1:18)/))
+!			variances(2) = variance((/datahours-mean_lifelabor(1:18)/))
+!			variances(3) = variance((/datassets - mean_lifeassets(1:18)/))
+!			variances(4) = variance((/dataret - mean_applied(1:18)/))
 		endif
 		
 		!allocate moments' weight
 		!allocate(multmat(3*tmom(icoh),3*tmom(icoh)))
-		allocate(weightmat(3*tmom(icoh),3*tmom(icoh)))		
+		allocate(weightmat(4*tmom(icoh),4*tmom(icoh)))		
 		!multmat = matmul(moments,transpose(moments))
 		!call inverse(multmat,weightmat,3*tmom(icoh))
 		weightmat = 0.0d0
-		do i = 1,2*tmom(icoh)
-			weightmat(i,i) = 1.0d0
+		do i = 1,tmom(icoh)
+			weightmat(i,i) = 1.0d0/sdlfp(i)
+			weightmat(tmom(icoh)+i,tmom(icoh)+ i) = 1.0d0/sdhours(i)
+			weightmat(2*tmom(icoh)+i,2*tmom(icoh)+i) = 0.0d0 !1.0d0/sdassets(i)
+			weightmat(3*tmom(icoh)+i,3*tmom(icoh)+i) = 0.0d0 !1.0d0/sdret(i)
 		enddo
+!		weightmat(4*tmom(icoh),4*tmom(icoh)) = 1.0d0/variances(4)
 !		do i = 1,3*tmom(icoh)
 !			if (i<=2*tmom(icoh)) then
 !				weightmat(i,i) = 1.0d0
@@ -785,7 +823,7 @@ contains
 		use procedures
 		use nrtype
 		implicit none
-		real (DP), dimension(:), intent(in)	:: strpar ! ltot kappa d cmin age0 beta delta eta sigma ugamma xi nu
+		real (DP), dimension(:), intent(inout)	:: strpar ! ltot kappa d cmin age0 beta delta eta sigma ugamma xi nu
 		real (DP) :: mom_calc !norm of the moments
 		call moment_wage_calc(strpar, mom_calc, delta_wage)
 	end function mom_calc
@@ -1201,7 +1239,7 @@ end subroutine valfun
 subroutine lc_simulation(cohort,in_asset,in_aime,in_wage,in_mexp,in_health,years_aime, &
 						wage,logwage,wzmean,wzsd,wbinborders,mexp,logmexp,mzmean,mzsd, &
 						mbinborders,ms,transmat,vf,vf_na,pf,pf_na,lchoice,lchoice_na,app_policy, surv, &
-						life_assets,life_labor,life_earnings, life_wage, life_medexp,app_age,tn_seed)
+						life_assets,life_labor,life_earnings, life_wage, life_medexp,life_health,app_age,tn_seed)
 !this subroutine simulates the life cycle of an individual given:
 !-cohort
 !-initial assets
@@ -1233,7 +1271,7 @@ real (kind = 8), dimension(grid_asset,statesize,grid_ss,lifespan,2), intent(in) 
 real (kind = 8), dimension(lifespan,nhealth), intent(in) :: surv
 real (kind = 8), dimension(grid_asset,statesize,grid_ss,lifespan,2), intent(in) :: lchoice_na
 real (kind = 8), intent(out) :: life_assets(lifespan)
-real (kind = 8), dimension(lifespan), intent(out) :: life_labor, life_earnings, life_wage, life_medexp
+real (kind = 8), dimension(lifespan), intent(out) :: life_labor, life_earnings, life_wage, life_medexp, life_health
 integer, intent(out) :: app_age !the variable wil contain age of social security application
 integer, intent(inout) :: tn_seed
 
@@ -1285,6 +1323,7 @@ life_assets 	= -1.0d0
 life_labor		= -1.0d0
 life_medexp 	= -1.0d0
 life_wage		= -1.0d0
+life_health		= -1.0d0
 
 !   create assets grid and social security grid
 assets(1)	= 0
@@ -1343,6 +1382,7 @@ do t = 1,lifespan
 	life_assets(t) 	= acur
 	life_wage(t) 	= wcur
 	life_medexp(t) 	= mcur
+	life_health(t) 	= h
 
 	! Find nearest wage grid points
 	if (life_wage(t)>=wage(t,w) .AND. w /= 5) then

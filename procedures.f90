@@ -623,4 +623,19 @@ enddo
 
 end function polynom
 
+FUNCTION variance(Array)
+	IMPLICIT NONE
+	REAL (kind = 8) :: variance, X
+	REAL (kind = 8), INTENT(IN),DIMENSION(:) :: Array
+	X = SUM(Array)/SIZE(Array)
+	variance = SUM((Array-X)**2)/SIZE(Array)
+END FUNCTION Variance
+
+function sd(array)
+	implicit none
+	real (kind = 8) sd
+	REAL (kind = 8), INTENT(IN),DIMENSION(:) :: array
+	
+	sd = sqrt(variance(array))
+end function sd
 end module procedures

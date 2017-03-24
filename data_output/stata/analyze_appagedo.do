@@ -7,7 +7,7 @@ sort ret_age
 gen a = 1
 by ret_age: egen numret = sum(a)
 collapse (mean) numret, by (ret_age)
-*line numret ret_age,sort
+line numret ret_age,sort
 rename numret numret_eta2_8
 merge 1:1 ret_age using retirement.dta
 drop _merge

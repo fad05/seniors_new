@@ -1,9 +1,9 @@
 *This script mimics he procedure I use to obtain wage profiles and deviations from average profiles in the data.
 *The difference is, I use model generated data here.
-clear all
+*clear all
 set more off
 *cd "/media/alex/Storage/Documents/Projects/Ageing and Education/fortran_code/seniors_new/data_output/stata"
-import delimited "../life_wage.txt", clear 
+import delimited "../life_wage_cd_`1'.txt", clear 
 mvdecode v*, mv(-1)
 *transpose the data
 xpose, clear
@@ -15,7 +15,7 @@ rename v hourwage
 sort age pid
 *log hourly wage
 gen loghwage = log(hourwage)
-reg loghwage age
+qui reg loghwage age
 *predicted log wage
 predict logwagepred
 *"residuals" by age
@@ -27,7 +27,7 @@ by age: egen zi_sd = sd(zi)
 gen age2 = age^2
 gen age3 = age^3
 gen age4 = age^4
-reg zi_sd age age2 age3 age4
+qui reg zi_sd age age2 age3 age4
 predict zisd_pred
 reg zi_mean age
 predict zimean_pred
@@ -55,7 +55,7 @@ rename (bin_min1 bin_min2 bin_min3 bin_min4 bin_min5 bin_max5) (b1 b2 b3 b4 b5 b
 *Smooth the borders
 keep b? age
 forvalues i = 1/6 { 
-	reg b`i' age
+	qui reg b`i' age
 	predict bpred`i'	
 }
 export delimited bpred? using "../../data_inputs/wagebin_borders_smooth_simul.csv", delimiter(";") nolabel replace 
@@ -70,7 +70,7 @@ by pid: egen maxnumobs = max(numobs)
 drop if numobs == maxnumobs
 drop numobs maxnumobs
 
-mlogit zibin_next zi_bin age, base(3)
+qui mlogit zibin_next zi_bin age, base(3)
 predict zn1 zn2 zn3 zn4 zn5
 sort zi_bin age zibin_next
 *twoway (line zn1 age if zi_bin == 5 & zibin_next == 1)(line zn2 age if zi_bin == 5 & zibin_next == 2)(line zn3 age if zi_bin == 5 & zibin_next == 3)(line zn4 age if zi_bin == 5 & zibin_next == 4)(line zn5 age if zi_bin == 5 & zibin_next == 5)

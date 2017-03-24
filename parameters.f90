@@ -15,9 +15,9 @@ module parameters
     integer, parameter :: grid_asset = 11, grid_ss = 11 ,nwagebins = 5, nmedbins = 5, ntypes = 8, nhealth = 2
     integer, parameter :: lifespan = 41, hmin = 0
     integer, parameter :: statesize = nwagebins*nmedbins*nhealth
-    integer, parameter :: nsim = 1000 !number of simulations
+    integer, parameter :: nsim = 2000 !number of simulations
     integer, parameter :: tmom(2) = (/34, 18/) !number of periods available for method of simulated moments: 34 periods (57 to 90) for c-0, 18 periods (50 to 67) for c-1
-    integer, parameter :: init_workyears = 30	
+    integer, parameter :: init_workyears = 25	
     									
 
     real (kind = 8), parameter :: 	tol = 1.0d-3, asset_min = 1.0d3, asset_max = 5.0d5, r = 2.0d-2
@@ -29,7 +29,7 @@ module parameters
     real (kind = 8), parameter :: ss_min = 1.0d3, ss_max = 3.467d4 !minimal social security: 1000USD/YEAR (arbitrary), maximal (real) ~ 2060USD/MONTH~32700USD/YEAR(*CPI2005/2003 = 1.06) = 34670$  to adjust for inflation
     real (kind = 8), parameter :: aime_max = 9.0d4	!Contribution And Benefit Base for 2005 is 90000USD (namely, a base for benefit calc cant be larger) 
     real (kind = 8), parameter :: scale_factor = 1.0d3
-    real (kind = 8), parameter :: nra(2) = (/65.0d0,66.0d0/)
+    real (kind = 8), parameter :: nra(2) = (/65.0d0,66.5d0/)
     real (kind = 8), parameter :: credit_delret(2) = (/4.25d-2,8.0d-2/) !averages for the first cohort (3% to 5%, and 8% to second cohort)
     real (kind = 8), parameter :: penalty_er3 = 6.6666d-2, penalty_long = 5.0d-2
     
