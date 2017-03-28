@@ -1,8 +1,8 @@
 clear all
 set more off
 cd "/media/alex/Storage/Documents/Projects/Ageing and Education/fortran_code/seniors_new/data_output/stata"
-local name ""
-import delimited "../life_labor_cd_6`_name'.txt", clear 
+local name "_policy"
+import delimited "../life_labor_cd_6`name'.txt", clear 
 *change all (-1) values (values for dead) to missing
 mvdecode v*, mv(-1)
 forvalues i = 2/42 {
@@ -49,15 +49,15 @@ egen lfp = rowmean(v*)
 egen medlfp = rowmedian(v*)
 egen sd_lfp = rowsd(v*)
 
-/*
+
 *preserve
-ren lfp lfp_`name'
-keep age lfp_`name'
+ren lfp lfp`name'
+keep age lfp`name'
 merge 1:1 age using lfp_counterfact.dta
 drop _merge
 save lfp_counterfact.dta, replace
 *restore
-*/
+
 
 drop v*
 

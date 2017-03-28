@@ -38,13 +38,13 @@ subroutine labchoice (lchoice, cons, util, acur,anext, h, wage, mexp,ss,age,coho
     real (kind = 8), intent(out) :: cons !consumption under optimal choice
     real (kind = 8), intent(out) :: util !value of utility under optimal choice
 end subroutine labchoice
-subroutine lc_simulation(cohort,in_asset,in_aime,in_wage,in_mexp,in_health,years_aime, &
+subroutine lc_simulation(cohort, in_asset,in_aime,in_wage,in_mexp,in_health,years_aime, &
 						wage,logwage,wzmean,wzsd,wbinborders,mexp,logmexp,mzmean,mzsd, &
 						mbinborders,ms,transmat,vf,vf_na,pf,pf_na,lchoice,lchoice_na,app_policy, surv, &
 						life_assets,life_labor,life_earnings, life_wage, life_medexp,life_health,app_age,tn_seed)
 	use parameters
 	use procedures
-	integer, intent(in) :: cohort, in_health
+	integer, intent(in)	:: cohort, in_health
 	real (kind = 8)		:: in_asset, in_aime,in_wage,in_mexp
 	integer, intent(in) :: years_aime
 	real (kind = 8), dimension(lifespan,nwagebins), intent(in) :: wage
@@ -592,7 +592,7 @@ contains
 !		Local var
 		real (kind = 8), dimension(:,:), allocatable :: multmat, weightmat
 		real (kind = 8) mn(1,1), variances(4)
-		integer ctype
+		integer ctype, ccoh
 
 
 	!	BODY OF FUNCTION
@@ -621,8 +621,9 @@ contains
 		lchoice_na = -20
 		!value function
 		ctype = 2
+		ccoh = 1
 		
-		call valfun(icoh,wagegrid(:,:,itype),mexpgrid(:,:,:,ctype),transmat(:,:,:,itype),surv(:,:,itype),ms, &
+		call valfun(ccoh,wagegrid(:,:,itype),mexpgrid(:,:,:,itype),transmat(:,:,:,itype),surv(:,:,itype),ms, &
 		vf,vf_na,pf,pf_na,lchoice,lchoice_na,app_policy)
 
 		!open files to save results
@@ -705,9 +706,9 @@ contains
 		!		print *, 'pause'
 		!	endif
 			
-			call lc_simulation(icoh,in_asset,in_aime,in_wage,in_mexp,in_health, init_workyears, wagegrid(:,:,itype), &
+			call lc_simulation(ccoh,in_asset,in_aime,in_wage,in_mexp,in_health, init_workyears, wagegrid(:,:,itype), &
 						logwage(:,itype),wzmean(:,itype),wzsd(:,itype), wbinborders, &
-						mexpgrid(:,:,:,ctype),logmexp(:,:,ctype),mzmean(:,:,ctype),mzsd(:,:,ctype), mbinborders, &
+						mexpgrid(:,:,:,itype),logmexp(:,:,itype),mzmean(:,:,itype),mzsd(:,:,itype), mbinborders, &
 						ms, transmat(:,:,:,itype),vf,vf_na,pf,pf_na,lchoice,lchoice_na,app_policy, surv(:,:,itype), &
 						life_assets,life_labor,life_earnings, life_wage, life_medexp,life_health,app_age,tn_seed)
 			!construct a vector of number of ss applications at a given age
@@ -1255,7 +1256,7 @@ subroutine lc_simulation(cohort,in_asset,in_aime,in_wage,in_mexp,in_health,years
 use parameters
 use procedures
 implicit none
-integer, intent(in) :: cohort, in_health
+integer, intent(in)	:: cohort, in_health
 real (kind = 8) 	:: in_asset, in_aime,in_wage,in_mexp
 integer, intent(in) :: years_aime
 real (kind = 8), dimension(lifespan,nwagebins), intent(in) :: wage

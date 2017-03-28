@@ -16,7 +16,7 @@ module parameters
     integer, parameter :: lifespan = 41, hmin = 0
     integer, parameter :: statesize = nwagebins*nmedbins*nhealth
     integer, parameter :: nsim = 2000 !number of simulations
-    integer, parameter :: tmom(2) = (/34, 18/) !number of periods available for method of simulated moments: 34 periods (57 to 90) for c-0, 18 periods (50 to 67) for c-1
+    integer, parameter :: tmom(2) = (/32, 18/) !number of periods available for method of simulated moments: 32 periods (58 to 89) for c-0, 18 periods (50 to 67) for c-1
     integer, parameter :: init_workyears = 25	
     									
 
@@ -47,7 +47,8 @@ module parameters
     
     !Taxation and ss taxation
     !tax formula is of the form: tax(y) = b*(1-(s*y**p+1)**(-1/p)); numbers are taken from Guner etal, 2014(RED)
-    real (kind = 8), parameter :: btax = 2.64d-1, stax = 1.36d-2, ptax = 9.64d-1 !stax is adjusted: stax  = s(from paper)/f^(-p); f = CPI2005/CPI2000 = 1.13416; s = 0.012
+    real (kind = 8), parameter :: btax(2) = (/4.79d-1, 2.64d-1/), stax(2) = (/1.36d-2, 3.55d-2/), ptax(2) = (/8.17d-1, 9.64d-1/) !stax is adjusted: stax  = s(from paper)/f^(-p); f = CPI2005/CPI2000 = 1.13416; s = 0.012 for young, 0.0321 for old
+
     !taxation of benefits
     real (kind = 8), parameter :: first_treshold(2) = (/2.5d4,3.2d4/), second_treshold(2) = (/3.4d4,4.4d4/)
     

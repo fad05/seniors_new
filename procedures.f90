@@ -273,16 +273,17 @@ real (kind = 8) distance2d
 distance2d = dsqrt((x2-x1)**2+(y2-y1)**2)
 end function distance2d
 
-function income_tax(income)
+function income_tax(income,cohort)
 use parameters
 !function takes taxable income as input and
 !spits out taxes to pay
+integer, intent(in) :: cohort
 real (kind = 8), intent(in) :: income 
 real tax_rate, income_in_thousands
 real income_tax
 
 income_in_thousands = income/1000 !formula uses income in thousands of dollars of 2000
-tax_rate = btax*(1.0-(1.0+stax*income_in_thousands**ptax)**(-1.0/ptax))
+tax_rate = btax(cohort)*(1.0-(1.0+stax(cohort)*income_in_thousands**ptax(cohort))**(-1.0/ptax(cohort)))
 income_tax = income*tax_rate
 
 end function income_tax

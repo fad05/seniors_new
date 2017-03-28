@@ -10,7 +10,7 @@ implicit none
 
 
 interface
-subroutine valfun(cohort,wage,medexp,transmat,surv,ms,vf,vf_na,pf,pf_na,lchoice,lchoice_na,app_policy)
+subroutine valfun(cohort, wage,medexp,transmat,surv,ms,vf,vf_na,pf,pf_na,lchoice,lchoice_na,app_policy)
     use parameters
     use procedures
     implicit none
@@ -988,6 +988,8 @@ subroutine valfun(cohort,wage,medexp,transmat,surv,ms,vf,vf_na,pf,pf_na,lchoice,
 !        return
 !    endif
 
+
+
 !2.    !create assets grid and social security grid
     assets(1)	= 0
     ss(1)		= 0
@@ -1252,7 +1254,7 @@ subroutine lc_simulation(cohort,in_asset,in_aime,in_wage,in_mexp,in_health,years
 use parameters
 use procedures
 implicit none
-integer, intent(in) :: cohort, in_health
+integer, intent(in)	:: cohort, in_health
 real (kind = 8) 	:: in_asset, in_aime,in_wage,in_mexp
 integer, intent(in) :: years_aime
 real (kind = 8), dimension(lifespan,nwagebins), intent(in) :: wage
@@ -1314,8 +1316,6 @@ real (kind = 8) ln0000,ln0001,ln0010,ln0011,ln0100,ln0101,ln0110,ln0111, &
 real (kind = 8) :: lmin = 5.0d3, lnmin = 5.0d3
 !Corresponding state values in s-space
 integer state00, state01,state10,state11
-
-
 
 !initialize vectors
 life_earnings 	= -1.0d0
