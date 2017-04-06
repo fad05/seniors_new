@@ -1,10 +1,12 @@
 module parameters
+!	0. Fixed parameters
+	real (kind = 8)		::	ltot = 5.0d3, beta = 0.95d0 
 !	1. Parameters for calibration: change during the calibration procedure
-	real (kind = 8)		::	ltot, kappa, d, cmin
-	real (kind = 8)		::	beta, delta, eta, sigma, ugamma
+	real (kind = 8)		::	kappa, d, cmin
+	real (kind = 8)		::	delta, eta, sigma
 	real (kind = 8)		::	xi, nu
-	real (kind = 8)		::	lgamma, cgamma
-	integer, parameter  ::	nparams = 11, nparams_cd = 12, nparams_pc1 = 12 !total number of calibraton parameters
+	real (kind = 8)		::	lgamma, cgamma, ugamma
+	integer, parameter  ::	nparams = 9, nparams_cd = 10, nparams_pc1 = 10 !total number of calibraton parameters
 	integer, parameter 	:: 	age0 = 50
 	real (kind = 8)		::	phi !hours of leisure lost due to bad health
 
@@ -20,7 +22,7 @@ module parameters
     integer, parameter :: init_workyears = 25	
     									
 
-    real (kind = 8), parameter :: 	tol = 1.0d-3, asset_min = 1.0d3, asset_max = 5.0d5, r = 2.0d-2
+    real (kind = 8), parameter :: 	tol = 1.0d-3, asset_min = 1.0d3, asset_max = 5.0d5, r(2) = (/2.0d-2, 1.0d-2/)
     
     !inflation adjustment : http://data.bls.gov/cgi-bin/cpicalc.pl
     !I calculate cap in the following way: calculate PIA at NRA taking base income from the table and increase PIA actuarially until age 70

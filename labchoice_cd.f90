@@ -175,11 +175,11 @@ return !end of subroutine
 			!**** EARNINGS TEST PT.1
 			!The further implementation of earnings test is inside "valfun" routine
 			
-			income = r*acrnt + earnings !asset return + labor income
+			income = r(cohort)*acrnt + earnings !asset return + labor income
 			taxable_income = taxable_amount(income*scale_factor, ssec_received*scale_factor)
 			taxes = income_tax(taxable_income,cohort)/scale_factor
 			
-			cns = (1+r)*acrnt + lbr*wg +ssec_received- anxt - mxp - taxes !uncompensated consumption; in the case when lbr==0, labor income is ZERO
+			cns = (1+r(cohort))*acrnt + lbr*wg +ssec_received- anxt - mxp - taxes !uncompensated consumption; in the case when lbr==0, labor income is ZERO
 			if (lbr == 0) then !labor is zero
 				if (anxt == 0) then !next-period assets are zero: agent is eligible for minimal consulption level					
 					if (cns > cmin_scaled) then !consumption is higher than minimal, no transfers

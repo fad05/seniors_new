@@ -197,24 +197,22 @@ real (kind = 8) ssr, conv_crit
 !PROGRAM BODY
 
 !	Initialize structural parameters
-!	ltot kappa d cmin beta delta eta sigma cgamma lgamma xi nu
-structparams = (/5.0d3, 9.0d2, 1.0d5, 2.6d3, 0.95d0, 0.2d0,  1.8d0, 1.75d0, 0.5d0, 0.5d0, 1.4d0, 2.0d0/)
+!	kappa d cmin delta eta sigma cgamma lgamma xi nu
+structparams = (/9.0d2, 1.0d5, 2.6d3, 0.2d0,  1.8d0, 1.75d0, 0.5d0, 0.5d0, 1.4d0, 2.0d0/)
 !structparams = (/3.8d0,870.07d0, 98691.4d0, 2584.5d0, 0.98d0, 0.2d0, 1.8d0, 1.78d0,  0.31d0,  0.39d0,1.9d0, 1.5d0/)
 !read (*,*)
 !parameter values:   4329.5102084019554        870.07494196261041        98691.438175558287        2584.4577746812288       0.98089214831123517       0.19956086722606781        1.7998490549485420        1.7784006858736456       0.30618202318229315       0.38606688813185541        1.3594207172878821        1.9883658329442573
 
-ltot 	= structparams(1)
-kappa 	= structparams(2)
-d 		= structparams(3)
-cmin 	= structparams(4)
-beta 	= structparams(5)
-delta	= structparams(6)
-eta 	= structparams(7)
-sigma 	= structparams(8)
-cgamma 	= structparams(9)
-lgamma 	= structparams(10)
-xi 		= structparams(11)
-nu 		= structparams(12)
+kappa 	= structparams(1)
+d 		= structparams(2)
+cmin 	= structparams(3)
+delta	= structparams(4)
+eta 	= structparams(5)
+sigma 	= structparams(6)
+cgamma 	= structparams(7)
+lgamma 	= structparams(8)
+xi 		= structparams(9)
+nu 		= structparams(10)
 
 ! Pick a type between 1 and 8, and calculate optimal labor choice matrix and value function for a chosen type (choice have been made in the beginning)
 !user inputs the type
@@ -598,21 +596,18 @@ contains
 	!	1. fill in the parameters, controlling for possible range
 !		allocate(stp(size(strpar)))
 		strpar		= max(strpar,0.0)
-		strpar(1)	= min(strpar(1), 5.0d3) !ltot E [0,5000]	
-		strpar(5) 	= min(max(strpar(5),0.9d0),0.99999d0) !beta E [0.9;0.99999]
+
 		
-		ltot 	= strpar(1)
-		kappa 	= strpar(2)
-		d 		= strpar(3)
-		cmin 	= strpar(4)
-		beta 	= strpar(5)
-		delta 	= strpar(6)
-		eta 	= strpar(7)
-		sigma 	= strpar(8)
-		cgamma 	= strpar(9)
-		lgamma 	= strpar(10)
-		xi 		= strpar(11)
-		nu 		= strpar(12)
+		kappa 	= strpar(1)
+		d 		= strpar(2)
+		cmin 	= strpar(3)
+		delta	= strpar(4)
+		eta 	= strpar(5)
+		sigma 	= strpar(6)
+		cgamma 	= strpar(7)
+		lgamma 	= strpar(8)
+		xi 		= strpar(9)
+		nu 		= strpar(10)
 
 	!	2. Calculate value function given these parameters
 		!labor choice

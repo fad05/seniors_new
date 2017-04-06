@@ -260,7 +260,7 @@ real (kind = 8), dimension(grid_asset), intent(in) :: assets
 real (kind = 8), dimension(grid_asset), intent(out) :: beq
 
 where ((assets+d) > 0)
-	beq = eta*((assets+d)/scale_factor)**(1-sigma)/(1-sigma) !notice scale factor here
+	beq = eta*((assets+d)/scale_factor)**(cgamma*(1-sigma))/(1-sigma) !notice scale factor here
 elsewhere
 	beq = -1.0d5
 endwhere
