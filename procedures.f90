@@ -639,4 +639,12 @@ function sd(array)
 	
 	sd = sqrt(variance(array))
 end function sd
+
+function survival_update(surv_rate,beta_times_logasset)
+real (kind = 8), intent(in) :: surv_rate, beta_times_logasset
+real (kind = 8) survival_update
+
+survival_update = sqrt(exp(beta_times_logasset)*surv_rate**2/(1-surv_rate**2+exp(beta_times_logasset)*surv_rate**2))
+
+end function survival_update
 end module procedures
